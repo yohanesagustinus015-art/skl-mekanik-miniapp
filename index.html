@@ -265,13 +265,26 @@ document.querySelectorAll(".tab").forEach((tab) => {
   tg.ready();
   tg.expand();
   document.getElementById("app").style.display = "block";
-  document.getElementById("mechanicName").textContent = tg.initDataUnsafe?.user?.first_name
-    ? "Halo, " + tg.initDataUnsafe.user.first_name
-    : "";
+  const greetName = tg.initDataUnsafe?.user?.first_name;
+  document.getElementById("mechanicName").textContent = greetName ? "Halo, " + greetName : "";
+  // Diagnostic, temporary (2026-08-27 A/B test): show exactly what
+  // Telegram handed the page, whichever button opened it -- initData is
+  // the signed string the server checks; initDataUnsafe is the same data
+  // parsed client-side without signature verification. If initDataUnsafe
+  // has a user but initData is still empty, that's a very different bug
+  // (signing/transport) than both being empty (bridge never populated at
+  // all).
+  console.log(
+    "mekanik-miniapp diag: initData length =", (tg.initData || "").length,
+    "| initDataUnsafe.user =", JSON.stringify(tg.initDataUnsafe?.user || null),
+    "| platform =", tg.platform,
+    "| version =", tg.version,
+  );
   try {
     await loadCatalogs();
   } catch (e) {
-    toast("Gagal memuat data: " + e.message);
+    const diag = "initData len=" + (tg.initData || "").length + ", unsafe.user=" + (greetName ? "yes" : "no") + ", platform=" + tg.platform + ", version=" + tg.version;
+    toast("Gagal memuat data: " + e.message + " [" + diag + "]");
   }
 })();
 </script>
