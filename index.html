@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Formulir Servis - PT SKL</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root {
+    --bg: var(--tg-theme-bg-color, #ffffff);
+    --text: var(--tg-theme-text-color, #1c1c1e);
+    --hint: var(--tg-theme-hint-color, #8e8e93);
+    --link: var(--tg-theme-link-color, #2481cc);
+    --button: var(--tg-theme-button-color, #2481cc);
+    --button-text: var(--tg-theme-button-text-color, #ffffff);
+    --secondary-bg: var(--tg-theme-secondary-bg-color, #f2f2f7);
+    --border: rgba(0,0,0,0.1);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 16px 16px 32px;
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 15px;
+  }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .subtitle { color: var(--hint); font-size: 13px; margin-bottom: 16px; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 16px; border-bottom: 1px solid var(--border); }
+  .tab {
+    flex: 1; text-align: center; padding: 10px 4px; font-size: 13px; font-weight: 600;
+    color: var(--hint); border-bottom: 2px solid transparent; cursor: pointer;
+  }
+  .tab.active { color: var(--link); border-bottom-color: var(--link); }
+  .screen { display: none; }
+  .screen.active { display: block; }
+  label { display: block; font-size: 13px; color: var(--hint); margin: 14px 0 6px; }
+  select, input, textarea {
+    width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border);
+    background: var(--secondary-bg); color: var(--text); font-size: 15px; font-family: inherit;
+  }
+  textarea { resize: vertical; min-height: 60px; }
+  button.primary {
+    width: 100%; margin-top: 20px; padding: 13px; border: none; border-radius: 10px;
+    background: var(--button); color: var(--button-text); font-size: 16px; font-weight: 600;
+    cursor: pointer;
+  }
+  button.primary:disabled { opacity: 0.5; }
+  .card {
+    background: var(--secondary-bg); border-radius: 12px; padding: 12px 14px; margin-bottom: 10px;
+  }
+  .card-title { font-weight: 600; margin-bottom: 2px; }
+  .card-meta { font-size: 13px; color: var(--hint); }
+  .card button {
+    margin-top: 10px; width: 100%; padding: 9px; border: none; border-radius: 8px;
+    background: var(--button); color: var(--button-text); font-size: 14px; font-weight: 600;
+  }
+  .empty { color: var(--hint); text-align: center; padding: 32px 0; font-size: 14px; }
+  .toast {
+    position: fixed; left: 16px; right: 16px; bottom: 16px; padding: 12px 16px;
+    border-radius: 10px; background: var(--text); color: var(--bg); font-size: 14px;
+    text-align: center; display: none; z-index: 10;
+  }
+  .not-telegram { text-align: center; padding: 60px 20px; color: var(--hint); }
+</style>
+</head>
+<body>
+
+<div id="notTelegram" class="not-telegram" style="display:none">
+  Buka formulir ini dari tombol "🔧 Buka Formulir Servis" di chat bot SKL Lapangan, bukan dari browser langsung.
+</div>
+
+<div id="app" style="display:none">
+  <h1>Formulir Servis</h1>
+  <div class="subtitle" id="mechanicName"></div>
+
+  <div class="tabs">
+    <div class="tab active" data-screen="new">Lapor Baru</div>
+    <div class="tab" data-screen="done">Tandai Selesai</div>
+    <div class="tab" data-screen="signoff">Sign-off</div>
+  </div>
+
+  <div class="screen active" id="screen-new">
+    <label>Truk</label>
+    <select id="f-truck"></select>
+    <label>Jenis kerusakan</label>
+    <select id="f-failure-mode"></select>
+    <label>Deskripsi</label>
+    <textarea id="f-description" placeholder="Jelaskan kerusakan yang ditemukan..."></textarea>
+    <button class="primary" id="btn-create">Simpan Laporan</button>
+  </div>
+
+  <div class="screen" id="screen-done">
+    <div id="list-open" class="empty">Memuat...</div>
+  </div>
+
+  <div class="screen" id="screen-signoff">
+    <div id="list-signoff" class="empty">Memuat...</div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API_URL = "https://kcftvbuwotjjroattdak.supabase.co/functions/v1/mekanik-api";
+const tg = window.Telegram && window.Telegram.WebApp;
+
+let catalogs = { failureModes: [], vendors: [], trucks: [] };
+
+function toast(msg) {
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.style.display = "block";
+  setTimeout(() => { t.style.display = "none"; }, 2600);
+}
+
+async function call(action, payload) {
+  const resp = await fetch(API_URL, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ initData: tg.initData, action, payload: payload || {} }),
+  });
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(body.error || ("HTTP " + resp.status));
+  return body;
+}
+
+function setScreen(name) {
+  document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.screen === name));
+  document.querySelectorAll(".screen").forEach((s) => s.classList.toggle("active", s.id === "screen-" + name));
+  if (name === "done") loadOpenRepairs();
+  if (name === "signoff") loadPendingSignoff();
+}
+
+async function loadCatalogs() {
+  const { failureModes, vendors, trucks } = await call("list_catalogs");
+  catalogs = { failureModes: failureModes || [], vendors: vendors || [], trucks: trucks || [] };
+
+  const truckSel = document.getElementById("f-truck");
+  truckSel.innerHTML = catalogs.trucks
+    .map((t) => `<option value="${t.id}">${t.nickname || t.plate || t.id}</option>`)
+    .join("");
+
+  const fmSel = document.getElementById("f-failure-mode");
+  fmSel.innerHTML = catalogs.failureModes
+    .map((f) => `<option value="${f.id}">${f.name}</option>`)
+    .join("");
+}
+
+document.getElementById("btn-create").addEventListener("click", async () => {
+  const btn = document.getElementById("btn-create");
+  btn.disabled = true;
+  try {
+    await call("create_repair", {
+      truck_id: document.getElementById("f-truck").value,
+      failure_mode_id: document.getElementById("f-failure-mode").value,
+      description: document.getElementById("f-description").value,
+    });
+    document.getElementById("f-description").value = "";
+    toast("Laporan servis disimpan.");
+    if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
+  } catch (e) {
+    toast("Gagal: " + e.message);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+async function loadOpenRepairs() {
+  const el = document.getElementById("list-open");
+  el.className = "";
+  el.innerHTML = "Memuat...";
+  const { repairs } = await call("list_open_repairs");
+  if (!repairs || repairs.length === 0) {
+    el.className = "empty";
+    el.innerHTML = "Tidak ada servis yang sedang berjalan.";
+    return;
+  }
+  el.innerHTML = repairs
+    .map((r) => `
+      <div class="card" data-id="${r.id}">
+        <div class="card-title">Truk ${r.truck_id}${r.failure_modes ? " -- " + r.failure_modes.name : ""}</div>
+        <div class="card-meta">${r.description || "(tanpa deskripsi)"}</div>
+        <label>Biaya (Rp, opsional)</label>
+        <input type="number" inputmode="numeric" class="f-cost" placeholder="0" />
+        <label>Vendor (opsional)</label>
+        <input type="text" class="f-vendor" placeholder="Nama bengkel/vendor" />
+        <label>Suku cadang dipakai (opsional)</label>
+        <input type="text" class="f-parts" placeholder="mis. kampas rem, oli mesin" />
+        <button class="btn-done">Tandai Selesai</button>
+      </div>
+    `)
+    .join("");
+
+  el.querySelectorAll(".btn-done").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const card = btn.closest(".card");
+      btn.disabled = true;
+      try {
+        await call("mark_done", {
+          id: card.dataset.id,
+          cost: card.querySelector(".f-cost").value,
+          vendor_name: card.querySelector(".f-vendor").value,
+          parts_used: card.querySelector(".f-parts").value,
+        });
+        toast("Ditandai selesai, menunggu sign-off.");
+        if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
+        loadOpenRepairs();
+      } catch (e) {
+        toast("Gagal: " + e.message);
+        btn.disabled = false;
+      }
+    });
+  });
+}
+
+async function loadPendingSignoff() {
+  const el = document.getElementById("list-signoff");
+  el.className = "";
+  el.innerHTML = "Memuat...";
+  const { repairs } = await call("list_pending_signoff");
+  if (!repairs || repairs.length === 0) {
+    el.className = "empty";
+    el.innerHTML = "Tidak ada servis menunggu sign-off.";
+    return;
+  }
+  el.innerHTML = repairs
+    .map((r) => `
+      <div class="card" data-id="${r.id}">
+        <div class="card-title">Truk ${r.truck_id}${r.failure_modes ? " -- " + r.failure_modes.name : ""}</div>
+        <div class="card-meta">
+          ${r.description || ""}${r.cost ? " -- Rp " + Number(r.cost).toLocaleString("id-ID") : ""}
+          ${r.mechanics ? " -- oleh " + r.mechanics.name : ""}
+        </div>
+        <button class="btn-signoff">Konfirmasi Selesai (Sign-off)</button>
+      </div>
+    `)
+    .join("");
+
+  el.querySelectorAll(".btn-signoff").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const card = btn.closest(".card");
+      btn.disabled = true;
+      try {
+        await call("sign_off", { id: card.dataset.id });
+        toast("Sign-off tercatat.");
+        if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
+        loadPendingSignoff();
+      } catch (e) {
+        toast("Gagal: " + e.message);
+        btn.disabled = false;
+      }
+    });
+  });
+}
+
+document.querySelectorAll(".tab").forEach((tab) => {
+  tab.addEventListener("click", () => setScreen(tab.dataset.screen));
+});
+
+(async function init() {
+  if (!tg) {
+    document.getElementById("notTelegram").style.display = "block";
+    return;
+  }
+  tg.ready();
+  tg.expand();
+  document.getElementById("app").style.display = "block";
+  document.getElementById("mechanicName").textContent = tg.initDataUnsafe?.user?.first_name
+    ? "Halo, " + tg.initDataUnsafe.user.first_name
+    : "";
+  try {
+    await loadCatalogs();
+  } catch (e) {
+    toast("Gagal memuat data: " + e.message);
+  }
+})();
+</script>
+</body>
+</html>
