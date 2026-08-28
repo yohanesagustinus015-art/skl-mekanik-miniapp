@@ -5,62 +5,80 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
 <title>Formulir Servis - PT SKL</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 <style>
+  /*
+    PT SKL brand system, matching skl-route-agent/dashboard.html
+    (the live dispatcher dashboard) exactly -- confirmed as the real,
+    already-shipped system rather than invented for this page (direct
+    instruction, 2026-08-27: "the design of the miniapp needs work" ->
+    match the dashboard). Fixed light theme only, no dark-mode variant --
+    the dashboard has none either, so Telegram's own --tg-theme-* vars
+    are deliberately NOT used here anymore; this app should look like
+    SKL's own tool, not adapt to whatever theme the chat happens to be in.
+  */
   :root {
-    --bg: var(--tg-theme-bg-color, #ffffff);
-    --text: var(--tg-theme-text-color, #1c1c1e);
-    --hint: var(--tg-theme-hint-color, #8e8e93);
-    --link: var(--tg-theme-link-color, #2481cc);
-    --button: var(--tg-theme-button-color, #2481cc);
-    --button-text: var(--tg-theme-button-text-color, #ffffff);
-    --secondary-bg: var(--tg-theme-secondary-bg-color, #f2f2f7);
-    --border: rgba(0,0,0,0.1);
+    --bg: #F5F2EE; --surface: #FFFFFF; --surface2: #F0EBE4; --surface3: #E5DDD3;
+    --border: #E2D9CC; --accent: #8B1A1A; --accent-hover: #6E1414; --accent-dim: #F3E3E3;
+    --text: #2B2420; --muted: #7A6F63; --dim: #B0A594;
+    --green: #1E8449; --red: #B91C1C;
+    --mono: 'JetBrains Mono', monospace; --sans: 'Inter', sans-serif; --display: 'Fraunces', serif;
   }
   * { box-sizing: border-box; }
   body {
     margin: 0; padding: 16px 16px 32px;
     background: var(--bg); color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    font-size: 15px;
+    font-family: var(--sans);
+    font-size: 15px; line-height: 1.5;
   }
-  h1 { font-size: 18px; margin: 0 0 4px; }
-  .subtitle { color: var(--hint); font-size: 13px; margin-bottom: 16px; }
-  .tabs { display: flex; gap: 8px; margin-bottom: 16px; border-bottom: 1px solid var(--border); }
+  h1 {
+    font-family: var(--display); font-size: 22px; font-weight: 600; color: var(--accent);
+    margin: 4px 0 2px;
+  }
+  .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 18px; }
+  .tabs { display: flex; gap: 4px; margin-bottom: 20px; border-bottom: 1px solid var(--border); }
   .tab {
     flex: 1; text-align: center; padding: 10px 4px; font-size: 13px; font-weight: 600;
-    color: var(--hint); border-bottom: 2px solid transparent; cursor: pointer;
+    color: var(--muted); border-bottom: 2px solid transparent; cursor: pointer;
   }
-  .tab.active { color: var(--link); border-bottom-color: var(--link); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
   .screen { display: none; }
   .screen.active { display: block; }
-  label { display: block; font-size: 13px; color: var(--hint); margin: 14px 0 6px; }
+  label { display: block; font-size: 13px; color: var(--muted); margin: 16px 0 6px; }
   select, input, textarea {
-    width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border);
-    background: var(--secondary-bg); color: var(--text); font-size: 15px; font-family: inherit;
+    width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface); color: var(--text); font-size: 15px; font-family: inherit;
   }
+  select:focus, input:focus, textarea:focus { outline: none; border-color: var(--accent); }
   textarea { resize: vertical; min-height: 60px; }
   button.primary {
-    width: 100%; margin-top: 20px; padding: 13px; border: none; border-radius: 10px;
-    background: var(--button); color: var(--button-text); font-size: 16px; font-weight: 600;
-    cursor: pointer;
+    width: 100%; margin-top: 22px; padding: 13px; border: none; border-radius: 8px;
+    background: var(--accent); color: #fff; font-size: 15px; font-weight: 600;
+    cursor: pointer; transition: background 0.15s;
   }
+  button.primary:hover { background: var(--accent-hover); }
   button.primary:disabled { opacity: 0.5; }
   .card {
-    background: var(--secondary-bg); border-radius: 12px; padding: 12px 14px; margin-bottom: 10px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px 16px; margin-bottom: 12px;
   }
   .card-title { font-weight: 600; margin-bottom: 2px; }
-  .card-meta { font-size: 13px; color: var(--hint); }
+  .card-title .truck-id { font-family: var(--mono); color: var(--accent); }
+  .card-meta { font-size: 13px; color: var(--muted); line-height: 1.5; }
   .card button {
-    margin-top: 10px; width: 100%; padding: 9px; border: none; border-radius: 8px;
-    background: var(--button); color: var(--button-text); font-size: 14px; font-weight: 600;
+    margin-top: 12px; width: 100%; padding: 9px; border: 1px solid var(--accent);
+    border-radius: 8px; background: var(--accent-dim); color: var(--accent);
+    font-size: 14px; font-weight: 600; cursor: pointer;
   }
-  .empty { color: var(--hint); text-align: center; padding: 32px 0; font-size: 14px; }
+  .empty { color: var(--dim); text-align: center; padding: 32px 0; font-size: 14px; }
   .toast {
     position: fixed; left: 16px; right: 16px; bottom: 16px; padding: 12px 16px;
-    border-radius: 10px; background: var(--text); color: var(--bg); font-size: 14px;
+    border-radius: 8px; background: var(--text); color: var(--bg); font-size: 14px;
     text-align: center; display: none; z-index: 10;
   }
-  .not-telegram { text-align: center; padding: 60px 20px; color: var(--hint); }
+  .not-telegram { text-align: center; padding: 60px 20px; color: var(--muted); }
 </style>
 </head>
 <body>
@@ -178,7 +196,7 @@ async function loadOpenRepairs() {
   el.innerHTML = repairs
     .map((r) => `
       <div class="card" data-id="${r.id}">
-        <div class="card-title">Truk ${r.truck_id}${r.failure_modes ? " -- " + r.failure_modes.name : ""}</div>
+        <div class="card-title"><span class="truck-id">Truk ${r.truck_id}</span>${r.failure_modes ? " -- " + r.failure_modes.name : ""}</div>
         <div class="card-meta">${r.description || "(tanpa deskripsi)"}</div>
         <label>Biaya (Rp, opsional)</label>
         <input type="number" inputmode="numeric" class="f-cost" placeholder="0" />
@@ -226,7 +244,7 @@ async function loadPendingSignoff() {
   el.innerHTML = repairs
     .map((r) => `
       <div class="card" data-id="${r.id}">
-        <div class="card-title">Truk ${r.truck_id}${r.failure_modes ? " -- " + r.failure_modes.name : ""}</div>
+        <div class="card-title"><span class="truck-id">Truk ${r.truck_id}</span>${r.failure_modes ? " -- " + r.failure_modes.name : ""}</div>
         <div class="card-meta">
           ${r.description || ""}${r.cost ? " -- Rp " + Number(r.cost).toLocaleString("id-ID") : ""}
           ${r.mechanics ? " -- oleh " + r.mechanics.name : ""}
