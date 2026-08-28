@@ -73,6 +73,21 @@
     font-size: 14px; font-weight: 600; cursor: pointer;
   }
   .empty { color: var(--dim); text-align: center; padding: 32px 0; font-size: 14px; }
+  .issue-row {
+    padding: 8px 0; border-top: 1px solid var(--border); font-size: 14px;
+  }
+  .issue-row:first-child { border-top: none; }
+  .issue-cost { color: var(--accent); font-weight: 600; }
+  details.add-issue {
+    margin-top: 12px; border-top: 1px dashed var(--border); padding-top: 10px;
+  }
+  details.add-issue summary {
+    color: var(--accent); font-size: 13px; font-weight: 600; cursor: pointer; list-style: none;
+  }
+  details.add-issue summary::-webkit-details-marker { display: none; }
+  details.add-issue[open] summary { margin-bottom: 4px; }
+  .card-total { font-size: 13px; color: var(--muted); margin-top: 10px; }
+  .card-total strong { color: var(--accent); }
   .toast {
     position: fixed; left: 16px; right: 16px; bottom: 16px; padding: 12px 16px;
     border-radius: 8px; background: var(--text); color: var(--bg); font-size: 14px;
@@ -123,6 +138,21 @@ const API_URL = "https://kcftvbuwotjjroattdak.supabase.co/functions/v1/mekanik-a
 const tg = window.Telegram && window.Telegram.WebApp;
 
 let catalogs = { failureModes: [], vendors: [], trucks: [] };
+
+function rupiah(n) {
+  return "Rp " + Number(n).toLocaleString("id-ID");
+}
+
+function failureModeOptions() {
+  return catalogs.failureModes.map((f) => `<option value="${f.id}">${f.name}</option>`).join("");
+}
+
+function issueRowHtml(issue) {
+  const fm = issue.failure_modes ? issue.failure_modes.name : "(lainnya)";
+  const cost = issue.cost ? ` <span class="issue-cost">-- ${rupiah(issue.cost)}</span>` : "";
+  const desc = issue.description ? " -- " + issue.description : "";
+  return `<div class="issue-row">${fm}${desc}${cost}</div>`;
+}
 
 function toast(msg) {
   const t = document.getElementById("toast");
@@ -196,18 +226,52 @@ async function loadOpenRepairs() {
   el.innerHTML = repairs
     .map((r) => `
       <div class="card" data-id="${r.id}">
-        <div class="card-title"><span class="truck-id">Truk ${r.truck_id}</span>${r.failure_modes ? " -- " + r.failure_modes.name : ""}</div>
-        <div class="card-meta">${r.description || "(tanpa deskripsi)"}</div>
-        <label>Biaya (Rp, opsional)</label>
-        <input type="number" inputmode="numeric" class="f-cost" placeholder="0" />
+        <div class="card-title"><span class="truck-id">Truk ${r.truck_id}</span></div>
+        <div class="issues-list">
+          ${(r.repair_record_issues || []).map(issueRowHtml).join("") || '<div class="issue-row">(belum ada masalah tercatat)</div>'}
+        </div>
+        <details class="add-issue">
+          <summary>+ Tambah masalah</summary>
+          <label>Jenis kerusakan</label>
+          <select class="new-issue-fm">${failureModeOptions()}</select>
+          <label>Deskripsi</label>
+          <textarea class="new-issue-desc" placeholder="Jelaskan kerusakan yang ditemukan..."></textarea>
+          <label>Biaya (Rp, opsional)</label>
+          <input type="number" inputmode="numeric" class="new-issue-cost" placeholder="0" />
+          <label>Suku cadang dipakai (opsional)</label>
+          <input type="text" class="new-issue-parts" placeholder="mis. kampas rem, oli mesin" />
+          <button class="btn-add-issue">Tambah</button>
+        </details>
         <label>Vendor (opsional)</label>
         <input type="text" class="f-vendor" placeholder="Nama bengkel/vendor" />
-        <label>Suku cadang dipakai (opsional)</label>
-        <input type="text" class="f-parts" placeholder="mis. kampas rem, oli mesin" />
         <button class="btn-done">Tandai Selesai</button>
       </div>
     `)
     .join("");
+
+  el.querySelectorAll(".btn-add-issue").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const card = btn.closest(".card");
+      const details = btn.closest("details");
+      btn.disabled = true;
+      try {
+        await call("add_issue", {
+          repair_record_id: card.dataset.id,
+          failure_mode_id: card.querySelector(".new-issue-fm").value,
+          description: card.querySelector(".new-issue-desc").value,
+          cost: card.querySelector(".new-issue-cost").value,
+          parts_used: card.querySelector(".new-issue-parts").value,
+        });
+        toast("Masalah ditambahkan.");
+        if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
+        details.open = false;
+        loadOpenRepairs();
+      } catch (e) {
+        toast("Gagal: " + e.message);
+        btn.disabled = false;
+      }
+    });
+  });
 
   el.querySelectorAll(".btn-done").forEach((btn) => {
     btn.addEventListener("click", async () => {
@@ -216,9 +280,7 @@ async function loadOpenRepairs() {
       try {
         await call("mark_done", {
           id: card.dataset.id,
-          cost: card.querySelector(".f-cost").value,
           vendor_name: card.querySelector(".f-vendor").value,
-          parts_used: card.querySelector(".f-parts").value,
         });
         toast("Ditandai selesai, menunggu sign-off.");
         if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
@@ -242,16 +304,24 @@ async function loadPendingSignoff() {
     return;
   }
   el.innerHTML = repairs
-    .map((r) => `
+    .map((r) => {
+      const issues = r.repair_record_issues || [];
+      const total = issues.reduce((sum, i) => sum + (Number(i.cost) || 0), 0);
+      return `
       <div class="card" data-id="${r.id}">
-        <div class="card-title"><span class="truck-id">Truk ${r.truck_id}</span>${r.failure_modes ? " -- " + r.failure_modes.name : ""}</div>
-        <div class="card-meta">
-          ${r.description || ""}${r.cost ? " -- Rp " + Number(r.cost).toLocaleString("id-ID") : ""}
+        <div class="card-title"><span class="truck-id">Truk ${r.truck_id}</span></div>
+        <div class="issues-list">
+          ${issues.map(issueRowHtml).join("") || '<div class="issue-row">(belum ada masalah tercatat)</div>'}
+        </div>
+        <div class="card-total">
+          Total: <strong>${rupiah(total)}</strong>
+          ${r.vendor_name ? " -- " + r.vendor_name : ""}
           ${r.mechanics ? " -- oleh " + r.mechanics.name : ""}
         </div>
         <button class="btn-signoff">Konfirmasi Selesai (Sign-off)</button>
       </div>
-    `)
+    `;
+    })
     .join("");
 
   el.querySelectorAll(".btn-signoff").forEach((btn) => {
