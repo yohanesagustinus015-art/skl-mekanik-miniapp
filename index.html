@@ -64,10 +64,36 @@
     background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
     padding: 14px 16px; margin-bottom: 12px;
   }
+  /* repair-card is the collapsible list version of .card, used on the
+     Diperbaiki screen (direct feedback, 2026-08-29: "can the list of
+     repairs being done be in a list form that can expand into the cards
+     rather than the whole card showing outright") -- same visual shell,
+     but the summary line is the always-visible compact row and
+     repair-body only renders once expanded. */
+  .repair-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    margin-bottom: 12px; overflow: hidden;
+  }
+  .repair-summary {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 14px 16px; cursor: pointer; list-style: none;
+  }
+  .repair-summary::-webkit-details-marker { display: none; }
+  .repair-summary::after {
+    content: "\25B8"; color: var(--muted); font-size: 12px; flex-shrink: 0;
+    transition: transform 0.15s;
+  }
+  .repair-card[open] .repair-summary::after { transform: rotate(90deg); }
+  .repair-summary .truck-id { font-family: var(--mono); color: var(--accent); font-weight: 600; }
+  .repair-summary-meta {
+    font-size: 13px; color: var(--muted); text-align: right; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap;
+  }
+  .repair-body { padding: 0 16px 14px; }
   .card-title { font-weight: 600; margin-bottom: 2px; }
   .card-title .truck-id { font-family: var(--mono); color: var(--accent); }
   .card-meta { font-size: 13px; color: var(--muted); line-height: 1.5; }
-  .card button {
+  .card button, .repair-body button {
     margin-top: 12px; width: 100%; padding: 9px; border: 1px solid var(--accent);
     border-radius: 8px; background: var(--accent-dim); color: var(--accent);
     font-size: 14px; font-weight: 600; cursor: pointer;
@@ -91,7 +117,9 @@
   .issue-edit[open] summary { color: var(--accent); }
   .issue-edit-actions { display: flex; gap: 8px; margin-top: 10px; }
   .issue-edit-actions button { margin-top: 0; flex: 1; }
-  .card button.btn-danger { border-color: var(--red); color: var(--red); background: transparent; }
+  .card button.btn-danger, .repair-body button.btn-danger {
+    border-color: var(--red); color: var(--red); background: transparent;
+  }
   .card-total { font-size: 13px; color: var(--muted); }
   .toast {
     position: fixed; left: 16px; right: 16px; bottom: 16px; padding: 12px 16px;
@@ -263,6 +291,12 @@ document.getElementById("btn-create").addEventListener("click", async () => {
 
 async function loadOpenRepairs() {
   const el = document.getElementById("list-open");
+  // Preserve which cards were already expanded across a refresh (add
+  // issue / update location / etc. all reload this list) -- otherwise
+  // every action collapses the card you were just working in.
+  const openIds = new Set(
+    [...el.querySelectorAll("details.repair-card[open]")].map((d) => d.dataset.id),
+  );
   el.className = "";
   el.innerHTML = "Memuat...";
   const { repairs } = await call("list_open_repairs");
@@ -272,10 +306,17 @@ async function loadOpenRepairs() {
     return;
   }
   el.innerHTML = repairs
-    .map((r) => `
-      <div class="card" data-id="${r.id}">
-        <div class="card-title"><span class="truck-id">Truk ${r.truck_id}</span></div>
-        <div class="card-meta">Servis #${r.seq} &middot; Mulai ${formatDate(r.downtime_start)}</div>
+    .map((r) => {
+      const issueCount = (r.repair_record_issues || []).length;
+      const loc = r.location ? LOCATION_LABELS[r.location] || r.location : "";
+      return `
+      <details class="repair-card" data-id="${r.id}" ${openIds.has(r.id) ? "open" : ""}>
+        <summary class="repair-summary">
+          <span class="truck-id">Truk ${r.truck_id}</span>
+          <span class="repair-summary-meta">Servis #${r.seq} &middot; ${issueCount} masalah${loc ? " &middot; " + loc : ""}</span>
+        </summary>
+        <div class="repair-body">
+        <div class="card-meta">Mulai ${formatDate(r.downtime_start)}</div>
         <div class="card-section">
           <label>Lokasi</label>
           <select class="f-location">${locationOptions(r.location)}</select>
@@ -292,13 +333,15 @@ async function loadOpenRepairs() {
           <button class="btn-add-issue">Tambah</button>
         </details>
         <button class="btn-done">Tandai Selesai</button>
-      </div>
-    `)
+        </div>
+      </details>
+    `;
+    })
     .join("");
 
   el.querySelectorAll(".f-location").forEach((sel) => {
     sel.addEventListener("change", async () => {
-      const card = sel.closest(".card");
+      const card = sel.closest(".repair-card");
       sel.disabled = true;
       try {
         await call("update_location", { id: card.dataset.id, location: sel.value });
@@ -314,8 +357,8 @@ async function loadOpenRepairs() {
 
   el.querySelectorAll(".btn-add-issue").forEach((btn) => {
     btn.addEventListener("click", async () => {
-      const card = btn.closest(".card");
-      const details = btn.closest("details");
+      const card = btn.closest(".repair-card");
+      const details = btn.closest(".add-issue");
       btn.disabled = true;
       try {
         await call("add_issue", {
@@ -378,7 +421,7 @@ async function loadOpenRepairs() {
 
   el.querySelectorAll(".btn-done").forEach((btn) => {
     btn.addEventListener("click", async () => {
-      const card = btn.closest(".card");
+      const card = btn.closest(".repair-card");
       btn.disabled = true;
       try {
         await call("mark_done", { id: card.dataset.id });
