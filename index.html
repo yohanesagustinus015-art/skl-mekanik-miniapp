@@ -73,19 +73,20 @@
     font-size: 14px; font-weight: 600; cursor: pointer;
   }
   .empty { color: var(--dim); text-align: center; padding: 32px 0; font-size: 14px; }
-  .issue-row {
-    padding: 8px 0; border-top: 1px solid var(--border); font-size: 14px;
+  /* Every distinct block inside a card (location, issues, add-issue,
+     total) shares the same top rule + gap, so the card reads as evenly
+     spaced sections instead of the parts nearest each other looking
+     cramped and the parts near a dashed divider looking loose. */
+  .card-section {
+    margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border);
   }
-  .issue-row:first-child { border-top: none; }
-  details.add-issue {
-    margin-top: 12px; border-top: 1px dashed var(--border); padding-top: 10px;
-  }
+  .issue-row { padding: 6px 0; font-size: 14px; }
   details.add-issue summary {
     color: var(--accent); font-size: 13px; font-weight: 600; cursor: pointer; list-style: none;
   }
   details.add-issue summary::-webkit-details-marker { display: none; }
   details.add-issue[open] summary { margin-bottom: 4px; }
-  .card-total { font-size: 13px; color: var(--muted); margin-top: 10px; }
+  .card-total { font-size: 13px; color: var(--muted); }
   .toast {
     position: fixed; left: 16px; right: 16px; bottom: 16px; padding: 12px 16px;
     border-radius: 8px; background: var(--text); color: var(--bg); font-size: 14px;
@@ -159,6 +160,13 @@ function issueRowHtml(issue) {
   const fm = issue.failure_modes ? issue.failure_modes.name : "(lainnya)";
   const desc = issue.description ? " -- " + issue.description : "";
   return `<div class="issue-row">${fm}${desc}</div>`;
+}
+
+function formatDate(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return d.toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" })
+    + " " + d.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
 }
 
 function toast(msg) {
@@ -235,12 +243,15 @@ async function loadOpenRepairs() {
     .map((r) => `
       <div class="card" data-id="${r.id}">
         <div class="card-title"><span class="truck-id">Truk ${r.truck_id}</span></div>
-        <label>Lokasi</label>
-        <select class="f-location">${locationOptions(r.location)}</select>
-        <div class="issues-list">
+        <div class="card-meta">Servis #${r.seq} &middot; Mulai ${formatDate(r.downtime_start)}</div>
+        <div class="card-section">
+          <label>Lokasi</label>
+          <select class="f-location">${locationOptions(r.location)}</select>
+        </div>
+        <div class="card-section issues-list">
           ${(r.repair_record_issues || []).map(issueRowHtml).join("") || '<div class="issue-row">(belum ada masalah tercatat)</div>'}
         </div>
-        <details class="add-issue">
+        <details class="add-issue card-section">
           <summary>+ Tambah masalah</summary>
           <label>Jenis kerusakan</label>
           <select class="new-issue-fm">${failureModeOptions()}</select>
@@ -324,10 +335,11 @@ async function loadPendingSignoff() {
       return `
       <div class="card" data-id="${r.id}">
         <div class="card-title"><span class="truck-id">Truk ${r.truck_id}</span></div>
-        <div class="issues-list">
+        <div class="card-meta">Servis #${r.seq} &middot; Mulai ${formatDate(r.downtime_start)}</div>
+        <div class="card-section issues-list">
           ${issues.map(issueRowHtml).join("") || '<div class="issue-row">(belum ada masalah tercatat)</div>'}
         </div>
-        <div class="card-total">
+        <div class="card-total card-section">
           ${r.location ? LOCATION_LABELS[r.location] || r.location : ""}
           ${r.mechanics ? " -- oleh " + r.mechanics.name : ""}
         </div>
