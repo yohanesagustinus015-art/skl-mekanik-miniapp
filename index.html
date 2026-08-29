@@ -86,6 +86,12 @@
   }
   details.add-issue summary::-webkit-details-marker { display: none; }
   details.add-issue[open] summary { margin-bottom: 4px; }
+  .issue-edit summary { cursor: pointer; list-style: none; }
+  .issue-edit summary::-webkit-details-marker { display: none; }
+  .issue-edit[open] summary { color: var(--accent); }
+  .issue-edit-actions { display: flex; gap: 8px; margin-top: 10px; }
+  .issue-edit-actions button { margin-top: 0; flex: 1; }
+  .card button.btn-danger { border-color: var(--red); color: var(--red); background: transparent; }
   .card-total { font-size: 13px; color: var(--muted); }
   .toast {
     position: fixed; left: 16px; right: 16px; bottom: 16px; padding: 12px 16px;
@@ -146,8 +152,10 @@ let catalogs = { failureModes: [], vendors: [], trucks: [] };
 
 const LOCATION_LABELS = { pool: "Pool", storing_luar: "Storing luar", bengkel_luar: "Bengkel luar" };
 
-function failureModeOptions() {
-  return catalogs.failureModes.map((f) => `<option value="${f.id}">${f.name}</option>`).join("");
+function failureModeOptions(selected) {
+  return catalogs.failureModes
+    .map((f) => `<option value="${f.id}" ${f.id === selected ? "selected" : ""}>${f.name}</option>`)
+    .join("");
 }
 
 function locationOptions(selected) {
@@ -160,6 +168,30 @@ function issueRowHtml(issue) {
   const fm = issue.failure_modes ? issue.failure_modes.name : "(lainnya)";
   const desc = issue.description ? " -- " + issue.description : "";
   return `<div class="issue-row">${fm}${desc}</div>`;
+}
+
+// Editable version, used only on the open-repairs ("Diperbaiki") screen
+// -- a mechanic can add a missed detail, fix a wrong failure mode, or
+// remove a misclick, but only while the session is still open (matches
+// mekanik-api's own gate on update_issue/delete_issue). <details> so the
+// default view stays scannable -- same progressive-disclosure pattern as
+// "+ Tambah masalah".
+function editableIssueRowHtml(issue) {
+  const fm = issue.failure_modes ? issue.failure_modes.name : "(lainnya)";
+  const desc = issue.description ? " -- " + issue.description : "";
+  return `
+    <details class="issue-edit" data-issue-id="${issue.id}">
+      <summary class="issue-row">${fm}${desc}</summary>
+      <label>Jenis kerusakan</label>
+      <select class="edit-issue-fm">${failureModeOptions(issue.failure_mode_id)}</select>
+      <label>Deskripsi</label>
+      <textarea class="edit-issue-desc" placeholder="Jelaskan kerusakan yang ditemukan...">${issue.description || ""}</textarea>
+      <div class="issue-edit-actions">
+        <button class="btn-save-issue">Simpan</button>
+        <button class="btn-delete-issue btn-danger">Hapus</button>
+      </div>
+    </details>
+  `;
 }
 
 function formatDate(iso) {
@@ -249,7 +281,7 @@ async function loadOpenRepairs() {
           <select class="f-location">${locationOptions(r.location)}</select>
         </div>
         <div class="card-section issues-list">
-          ${(r.repair_record_issues || []).map(issueRowHtml).join("") || '<div class="issue-row">(belum ada masalah tercatat)</div>'}
+          ${(r.repair_record_issues || []).map(editableIssueRowHtml).join("") || '<div class="issue-row">(belum ada masalah tercatat)</div>'}
         </div>
         <details class="add-issue card-section">
           <summary>+ Tambah masalah</summary>
@@ -294,6 +326,48 @@ async function loadOpenRepairs() {
         toast("Masalah ditambahkan.");
         if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
         details.open = false;
+        loadOpenRepairs();
+      } catch (e) {
+        toast("Gagal: " + e.message);
+        btn.disabled = false;
+      }
+    });
+  });
+
+  el.querySelectorAll(".btn-save-issue").forEach((btn) => {
+    btn.addEventListener("click", async (ev) => {
+      ev.preventDefault();
+      const details = btn.closest(".issue-edit");
+      btn.disabled = true;
+      try {
+        await call("update_issue", {
+          id: details.dataset.issueId,
+          failure_mode_id: details.querySelector(".edit-issue-fm").value,
+          description: details.querySelector(".edit-issue-desc").value,
+        });
+        toast("Perubahan disimpan.");
+        if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
+        loadOpenRepairs();
+      } catch (e) {
+        toast("Gagal: " + e.message);
+        btn.disabled = false;
+      }
+    });
+  });
+
+  el.querySelectorAll(".btn-delete-issue").forEach((btn) => {
+    btn.addEventListener("click", async (ev) => {
+      ev.preventDefault();
+      const details = btn.closest(".issue-edit");
+      const confirmed = tg && tg.showConfirm
+        ? await new Promise((resolve) => tg.showConfirm("Hapus masalah ini?", resolve))
+        : confirm("Hapus masalah ini?");
+      if (!confirmed) return;
+      btn.disabled = true;
+      try {
+        await call("delete_issue", { id: details.dataset.issueId });
+        toast("Masalah dihapus.");
+        if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
         loadOpenRepairs();
       } catch (e) {
         toast("Gagal: " + e.message);
