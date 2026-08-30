@@ -117,6 +117,13 @@
   .issue-edit[open] summary { color: var(--accent); }
   .issue-edit-actions { display: flex; gap: 8px; margin-top: 10px; }
   .issue-edit-actions button { margin-top: 0; flex: 1; }
+  /* Wraps each issue's (.issue-edit details + .issue-actions) pair so
+     consecutive masalah read as visually separate blocks -- direct
+     feedback, 2026-08-30: "not enough white space" between them once
+     both are expanded (before this, nothing but the details element's
+     own tiny margins separated one masalah from the next). */
+  .issue-unit { padding: 10px 0; border-top: 1px solid var(--border); }
+  .issue-unit:first-child { border-top: none; padding-top: 0; }
   .card button.btn-danger, .repair-body button.btn-danger {
     border-color: var(--red); color: var(--red); background: transparent;
   }
@@ -248,18 +255,25 @@ function editableIssueRowHtml(issue) {
 // Sibling block, NOT inside the <details> above -- an <input>/<button>
 // inside a <summary> fights the details/summary click-to-toggle, so this
 // renders as its own always-visible row right after it instead.
-// 'reported' -> mechanic can type what part's needed (collected at
-// session-submit time by btn-request-parts, not here individually).
+// 'reported' -> mechanic types what part's needed and submits THIS ONE
+// issue right away (per-issue, not batched -- see btn-request-parts'
+// click handler below for why).
 // 'in_progress' -> mechanic marks this one issue done once physically
 // fixed. Anything else (request_for_parts/vendor_selected/done/verified)
 // is read-only here -- someone else (staff/owner) or the cascade from
 // sign_off owns that transition.
 function issueActionsHtml(issue) {
   if (issue.status === "reported") {
+    // Per-issue submit (2026-08-30, direct feedback while testing --
+    // previously one bulk button for the whole session, which had a real
+    // bug: leaving a NOT-yet-diagnosed masalah's input blank looked
+    // identical to "genuinely no part needed" and wrongly fast-forwarded
+    // it to in_progress. Each masalah is now its own deliberate decision.
     return `
       <div class="issue-actions" data-issue-id="${issue.id}">
         <label>Suku cadang dibutuhkan (kosongkan jika tidak perlu beli apa-apa)</label>
         <input type="text" class="issue-parts-needed" placeholder="mis. aki, kampas rem" />
+        <button class="btn-request-parts">Ajukan Permintaan Suku Cadang</button>
       </div>
     `;
   }
@@ -361,12 +375,6 @@ async function loadOpenRepairs() {
       const issues = r.repair_record_issues || [];
       const issueCount = issues.length;
       const loc = r.location ? LOCATION_LABELS[r.location] || r.location : "";
-      // Diagnosis-complete gate for "Ajukan Permintaan Suku Cadang" (per
-      // Yohanes's own description of the flow: report -> diagnose,
-      // possibly finding more problems -> ONE submit for everything
-      // found). Only shown while at least one issue is still sitting at
-      // 'reported' with nothing decided yet.
-      const anyReported = issues.some((i) => i.status === "reported");
       // mark_done's own server-side gate requires EVERY issue 'done' --
       // mirrored client-side so the button reads as disabled/explained
       // instead of a mechanic tapping it and just getting an error toast.
@@ -384,7 +392,7 @@ async function loadOpenRepairs() {
           <select class="f-location">${locationOptions(r.location)}</select>
         </div>
         <div class="card-section issues-list">
-          ${issues.map((i) => editableIssueRowHtml(i) + issueActionsHtml(i)).join("") || '<div class="issue-row">(belum ada masalah tercatat)</div>'}
+          ${issues.map((i) => `<div class="issue-unit">${editableIssueRowHtml(i)}${issueActionsHtml(i)}</div>`).join("") || '<div class="issue-row">(belum ada masalah tercatat)</div>'}
         </div>
         <details class="add-issue card-section">
           <summary>+ Tambah masalah</summary>
@@ -394,7 +402,6 @@ async function loadOpenRepairs() {
           <textarea class="new-issue-desc" placeholder="Jelaskan kerusakan yang ditemukan..."></textarea>
           <button class="btn-add-issue">Tambah</button>
         </details>
-        ${anyReported ? `<button class="btn-request-parts">Ajukan Permintaan Suku Cadang</button>` : ""}
         ${allDone
           ? `<button class="btn-done">Tandai Selesai</button>`
           : `<div class="btn-done-disabled">Selesaikan semua masalah dulu untuk menutup servis ini</div>`}
@@ -445,19 +452,20 @@ async function loadOpenRepairs() {
   el.querySelectorAll(".btn-request-parts").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const card = btn.closest(".repair-card");
+      const row = btn.closest(".issue-actions");
+      const input = row.querySelector(".issue-parts-needed");
       btn.disabled = true;
       try {
-        // One submit per session, per Yohanes's own description of the
-        // flow -- collects every issue still sitting at 'reported' (each
-        // one's own .issue-parts-needed input, empty is fine, means
-        // no part needed) and sends them all in one call.
-        const issues = [...card.querySelectorAll(".issue-actions")]
-          .map((row) => {
-            const input = row.querySelector(".issue-parts-needed");
-            return input ? { id: row.dataset.issueId, parts_used: input.value } : null;
-          })
-          .filter(Boolean);
-        await call("request_parts", { repair_record_id: card.dataset.id, issues });
+        // Per-issue submit (2026-08-30, direct feedback while testing --
+        // was one bulk button for the whole session; real bug found:
+        // leaving a not-yet-diagnosed masalah's input blank was
+        // indistinguishable from "genuinely no part needed" and wrongly
+        // fast-forwarded it. request_parts' payload still accepts an
+        // array -- this just always sends a single-item one now.
+        await call("request_parts", {
+          repair_record_id: card.dataset.id,
+          issues: [{ id: row.dataset.issueId, parts_used: input.value }],
+        });
         toast("Permintaan suku cadang diajukan.");
         if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
         loadOpenRepairs();
