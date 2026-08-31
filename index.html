@@ -146,6 +146,10 @@
   .btn-request-parts { width: 100%; margin-top: 14px; padding: 12px; border: none; border-radius: 8px; background: var(--accent); color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; }
   .btn-request-parts:disabled { opacity: 0.5; }
   .btn-done-disabled { width: 100%; margin-top: 12px; padding: 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface2); color: var(--dim); font-size: 13px; text-align: center; }
+  .photo-row { display: flex; gap: 8px; margin-top: 12px; }
+  .photo-btn { flex: 1; padding: 9px 4px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface2); color: var(--text); font-size: 13px; font-weight: 600; cursor: pointer; text-align: center; }
+  .photo-btn.uploaded { border-color: var(--green); color: var(--green); background: transparent; }
+  .photo-btn input { display: none; }
 </style>
 </head>
 <body>
@@ -287,6 +291,37 @@ function issueActionsHtml(issue) {
   return "";
 }
 
+// Downscale a phone-camera photo before it goes into a base64 JSON
+// payload (checklist C2, 2026-08-31) -- draws onto a canvas at reduced
+// size, exports as JPEG, returns just the base64 (no data: URL prefix,
+// mekanik-api decodes it raw).
+function resizeImageToBase64(file, maxDim, quality) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Gagal membaca file"));
+    reader.onload = () => {
+      img.onerror = () => reject(new Error("Gagal memuat gambar"));
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > maxDim || height > maxDim) {
+          const scale = maxDim / Math.max(width, height);
+          width = Math.round(width * scale);
+          height = Math.round(height * scale);
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+        const dataUrl = canvas.toDataURL("image/jpeg", quality);
+        resolve(dataUrl.split(",")[1]);
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 function formatDate(iso) {
   if (!iso) return "";
   const d = new Date(iso);
@@ -402,6 +437,16 @@ async function loadOpenRepairs() {
           <textarea class="new-issue-desc" placeholder="Jelaskan kerusakan yang ditemukan..."></textarea>
           <button class="btn-add-issue">Tambah</button>
         </details>
+        <div class="card-section photo-row">
+          <label class="photo-btn ${r.before_photo_url ? "uploaded" : ""}">
+            <span class="photo-btn-label">${r.before_photo_url ? "✓ Foto Sebelum" : "📷 Foto Sebelum"}</span>
+            <input type="file" accept="image/*" capture="environment" class="photo-input" data-photo-type="before" />
+          </label>
+          <label class="photo-btn ${r.after_photo_url ? "uploaded" : ""}">
+            <span class="photo-btn-label">${r.after_photo_url ? "✓ Foto Sesudah" : "📷 Foto Sesudah"}</span>
+            <input type="file" accept="image/*" capture="environment" class="photo-input" data-photo-type="after" />
+          </label>
+        </div>
         ${allDone
           ? `<button class="btn-done">Tandai Selesai</button>`
           : `<div class="btn-done-disabled">Selesaikan semua masalah dulu untuk menutup servis ini</div>`}
@@ -488,6 +533,37 @@ async function loadOpenRepairs() {
       } catch (e) {
         toast("Gagal: " + e.message);
         btn.disabled = false;
+      }
+    });
+  });
+
+  // Checklist C2, 2026-08-31. Downscales client-side before upload --
+  // a raw phone-camera photo is several MB, way over what should go
+  // through a base64 JSON payload; capped to 1600px on the long edge,
+  // JPEG quality 0.8, which is plenty for a documentation photo.
+  el.querySelectorAll(".photo-input").forEach((input) => {
+    input.addEventListener("change", async () => {
+      const file = input.files && input.files[0];
+      if (!file) return;
+      const card = input.closest(".repair-card");
+      const labelText = input.closest(".photo-btn").querySelector(".photo-btn-label");
+      const photoType = input.dataset.photoType;
+      const originalText = labelText.textContent;
+      labelText.textContent = "Mengunggah...";
+      try {
+        const base64 = await resizeImageToBase64(file, 1600, 0.8);
+        await call("upload_photo", {
+          repair_record_id: card.dataset.id,
+          photo_type: photoType,
+          filename: file.name || (photoType + ".jpg"),
+          content_base64: base64,
+        });
+        toast("Foto diunggah.");
+        if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
+        loadOpenRepairs();
+      } catch (e) {
+        toast("Gagal unggah foto: " + e.message);
+        labelText.textContent = originalText;
       }
     });
   });
