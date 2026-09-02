@@ -267,28 +267,26 @@ function editableIssueRowHtml(issue) {
 // Sibling block, NOT inside the <details> above -- an <input>/<button>
 // inside a <summary> fights the details/summary click-to-toggle, so this
 // renders as its own always-visible row right after it instead.
-// 'reported' -> mechanic types what part's needed and submits THIS ONE
-// issue right away (per-issue, not batched -- see btn-request-parts'
-// click handler below for why).
 // 'in_progress' -> mechanic marks this one issue done once physically
-// fixed. Anything else (request_for_parts/vendor_selected/done/verified)
-// is read-only here -- someone else (staff/owner) or the cascade from
-// sign_off owns that transition.
+// fixed. 'done'/'verified' -> nothing left to do here; someone else
+// (staff/owner) or the cascade from sign_off owns everything past that.
+//
+// Redefined 2026-09-03, direct instruction: "permintaan suku cadang
+// needs to be allowed multiple times for each issue, in case they
+// forget to type something -- even while sedang dikerjakan, they
+// should still have a place to raise additional sparepart requests."
+// Was previously one early-return per status (request-parts OR the
+// status-specific action, never both, and only ever at 'reported').
+// Now composes blocks together: whatever status-specific action
+// applies (vendor note/Mulai Perbaikan, Tandai Selesai) PLUS an
+// always-available "ajukan tambahan" block for any status short of
+// done/verified, showing what's already been requested so a repeat
+// submission reads as adding to it, not replacing it.
 function issueActionsHtml(issue) {
-  if (issue.status === "reported") {
-    // Per-issue submit (2026-08-30, direct feedback while testing --
-    // previously one bulk button for the whole session, which had a real
-    // bug: leaving a NOT-yet-diagnosed masalah's input blank looked
-    // identical to "genuinely no part needed" and wrongly fast-forwarded
-    // it to in_progress. Each masalah is now its own deliberate decision.
-    return `
-      <div class="issue-actions" data-issue-id="${issue.id}">
-        <label>Suku cadang dibutuhkan (kosongkan jika tidak perlu beli apa-apa)</label>
-        <input type="text" class="issue-parts-needed" placeholder="mis. aki, kampas rem" />
-        <button class="btn-request-parts">Ajukan Permintaan Suku Cadang</button>
-      </div>
-    `;
-  }
+  if (issue.status === "done" || issue.status === "verified") return "";
+
+  const blocks = [];
+
   if (issue.status === "vendor_selected") {
     // 2026-08-31, direct feedback: "let dispatcher/mechanic be able to
     // say mulai perbaikan when parts arrive" -- only show the button
@@ -297,28 +295,31 @@ function issueActionsHtml(issue) {
     const quotes = issue.vendor_quotes || [];
     const approved = quotes.find((q) => q.is_selected && q.approved_by_owner);
     if (approved) {
-      return `
-        <div class="issue-actions" data-issue-id="${issue.id}">
-          <div class="issue-vendor-note">Vendor: ${approved.vendor_name} -- sudah disetujui</div>
-          <button class="btn-start-progress">Mulai Perbaikan (Part Sudah Sampai)</button>
-        </div>
-      `;
-    }
-    const selected = quotes.find((q) => q.is_selected);
-    return `
-      <div class="issue-actions" data-issue-id="${issue.id}">
+      blocks.push(`
+        <div class="issue-vendor-note">Vendor: ${approved.vendor_name} -- sudah disetujui</div>
+        <button class="btn-start-progress">Mulai Perbaikan (Part Sudah Sampai)</button>
+      `);
+    } else {
+      const selected = quotes.find((q) => q.is_selected);
+      blocks.push(`
         <div class="issue-vendor-note">${selected ? "Menunggu persetujuan pemilik: " + selected.vendor_name : "Menunggu staff memilih vendor"}</div>
-      </div>
-    `;
+      `);
+    }
   }
+
   if (issue.status === "in_progress") {
-    return `
-      <div class="issue-actions" data-issue-id="${issue.id}">
-        <button class="btn-issue-done">Tandai Masalah Ini Selesai</button>
-      </div>
-    `;
+    blocks.push(`<button class="btn-issue-done">Tandai Masalah Ini Selesai</button>`);
   }
-  return "";
+
+  const already = issue.parts_used ? `<div class="issue-vendor-note">Sudah diajukan: ${issue.parts_used}</div>` : "";
+  blocks.push(`
+    ${already}
+    <label>${issue.parts_used ? "Tambah suku cadang lain (opsional)" : "Suku cadang dibutuhkan (kosongkan jika tidak perlu beli apa-apa)"}</label>
+    <input type="text" class="issue-parts-needed" placeholder="mis. aki, kampas rem" />
+    <button class="btn-request-parts">${issue.parts_used ? "Ajukan Tambahan" : "Ajukan Permintaan Suku Cadang"}</button>
+  `);
+
+  return `<div class="issue-actions" data-issue-id="${issue.id}">${blocks.join("")}</div>`;
 }
 
 // Videos can't go through canvas resize like photos can -- this pipeline
