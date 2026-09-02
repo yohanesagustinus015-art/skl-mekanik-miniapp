@@ -395,6 +395,10 @@ function setScreen(name) {
 
 async function loadCatalogs() {
   const { failureModes, vendors, trucks } = await call("list_catalogs");
+  renderCatalogs({ failureModes, vendors, trucks });
+}
+
+function renderCatalogs({ failureModes, vendors, trucks }) {
   catalogs = { failureModes: failureModes || [], vendors: vendors || [], trucks: trucks || [] };
 
   const truckSel = document.getElementById("f-truck");
@@ -443,17 +447,25 @@ let openRepairsLoaded = false;
 
 async function loadOpenRepairs() {
   const el = document.getElementById("list-open");
+  if (!openRepairsLoaded) {
+    el.className = "";
+    el.innerHTML = "Memuat...";
+  }
+  const { repairs } = await call("list_open_repairs");
+  renderOpenRepairs(repairs);
+}
+
+// Split out of loadOpenRepairs (2026-09-02) so the combined init_data
+// prefetch can render bundled data straight away without a second
+// network call just to re-fetch what it already has.
+function renderOpenRepairs(repairs) {
+  const el = document.getElementById("list-open");
   // Preserve which cards were already expanded across a refresh (add
   // issue / update location / etc. all reload this list) -- otherwise
   // every action collapses the card you were just working in.
   const openIds = new Set(
     [...el.querySelectorAll("details.repair-card[open]")].map((d) => d.dataset.id),
   );
-  if (!openRepairsLoaded) {
-    el.className = "";
-    el.innerHTML = "Memuat...";
-  }
-  const { repairs } = await call("list_open_repairs");
   openRepairsLoaded = true;
   if (!repairs || repairs.length === 0) {
     el.className = "empty";
@@ -732,6 +744,11 @@ async function loadPendingSignoff() {
     el.innerHTML = "Memuat...";
   }
   const { repairs } = await call("list_pending_signoff");
+  renderPendingSignoff(repairs);
+}
+
+function renderPendingSignoff(repairs) {
+  const el = document.getElementById("list-signoff");
   pendingSignoffLoaded = true;
   if (!repairs || repairs.length === 0) {
     el.className = "empty";
@@ -789,19 +806,24 @@ document.querySelectorAll(".tab").forEach((tab) => {
   document.getElementById("app").style.display = "block";
   const greetName = tg.initDataUnsafe?.user?.first_name;
   document.getElementById("mechanicName").textContent = greetName ? "Halo, " + greetName : "";
+  // Combined single request (2026-09-02): this used to be three
+  // separate calls (list_catalogs, list_open_repairs,
+  // list_pending_signoff), each paying its own Edge Function round
+  // trip -- measured, that fixed per-call overhead (network + cold
+  // start) was the real cost, not the DB work. init_data runs all
+  // five underlying queries server-side and returns them in one
+  // response, so page load pays that overhead once instead of three
+  // times. Diperbaiki/Sign-off render immediately from this same
+  // response too -- no second network call needed just to show what
+  // we already fetched.
   try {
-    await loadCatalogs();
+    const { failureModes, vendors, trucks, openRepairs, pendingSignoff } = await call("init_data");
+    renderCatalogs({ failureModes, vendors, trucks });
+    renderOpenRepairs(openRepairs);
+    renderPendingSignoff(pendingSignoff);
   } catch (e) {
     toast("Gagal memuat data: " + e.message);
   }
-  // Eager prefetch (2026-09-02): fire these now, not on first tab
-  // click, so by the time the mechanic actually taps Diperbaiki/
-  // Sign-off the list is very likely already cached -- see the
-  // loaded-flag comment above loadOpenRepairs. Not awaited: the
-  // "Lapor Baru" screen (already visible) shouldn't wait on tabs the
-  // mechanic hasn't opened yet.
-  loadOpenRepairs().catch(() => {});
-  loadPendingSignoff().catch(() => {});
 })();
 </script>
 </body>
