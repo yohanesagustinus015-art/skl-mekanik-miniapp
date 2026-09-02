@@ -479,6 +479,15 @@ function renderOpenRepairs(repairs) {
     el.innerHTML = "Tidak ada servis yang sedang berjalan.";
     return;
   }
+  // Real bug, found 2026-09-03 from a screenshot: className was only
+  // ever reset to "" before the FIRST-ever fetch (see the loading-
+  // state branch in loadOpenRepairs). If the list was empty at some
+  // point after that (className left as "empty", which text-aligns
+  // center) and later got real content, this branch overwrote
+  // innerHTML but never cleared className -- so the centered .empty
+  // style stuck around a real, populated list. Explains a report of
+  // "text not left-aligned" that had nothing to do with the device.
+  el.className = "";
   el.innerHTML = repairs
     .map((r) => {
       const issues = r.repair_record_issues || [];
@@ -760,6 +769,9 @@ function renderPendingSignoff(repairs) {
     el.innerHTML = "Tidak ada servis menunggu sign-off.";
     return;
   }
+  // Same fix as renderOpenRepairs above -- className must be reset
+  // here too, not just before the first-ever fetch.
+  el.className = "";
   el.innerHTML = repairs
     .map((r) => {
       const issues = r.repair_record_issues || [];
