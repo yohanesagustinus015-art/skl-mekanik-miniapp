@@ -506,12 +506,8 @@ function renderOpenRepairs(repairs) {
         </details>
         <div class="card-section photo-row">
           <label class="photo-btn">
-            <span class="photo-btn-label">📷 Ambil Foto</span>
-            <input type="file" accept="image/*" capture="environment" class="photo-input" />
-          </label>
-          <label class="photo-btn">
-            <span class="photo-btn-label">🖼️ Pilih File/Video</span>
-            <input type="file" accept="image/*,video/*" class="photo-input" />
+            <span class="photo-btn-label">📷 Tambah Foto/Video</span>
+            <input type="file" accept="image/*,video/*" capture="environment" class="photo-input" />
           </label>
           ${(() => {
             const photos = r.repair_photos || [];
