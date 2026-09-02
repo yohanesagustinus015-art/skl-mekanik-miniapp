@@ -428,6 +428,19 @@ document.getElementById("btn-create").addEventListener("click", async () => {
   }
 });
 
+// Direct feedback, 2026-09-02: "Diperbaiki" tab felt slow to open.
+// Measured -- the actual DB query is sub-millisecond even fully
+// joined, so it isn't a data/index problem, it's the fixed cost of
+// one Edge Function round trip (network + cold start), unavoidable
+// per-call. Can't make the call itself faster, so hide it instead:
+// track whether this list has ever loaded, and only show the
+// "Memuat..." wipe-and-wait on the very first load. Every load after
+// that (including the eager prefetch at init, see bottom of file)
+// keeps showing the last-known list while quietly refreshing behind
+// it -- switching to the tab feels instant even though the network
+// call is still happening.
+let openRepairsLoaded = false;
+
 async function loadOpenRepairs() {
   const el = document.getElementById("list-open");
   // Preserve which cards were already expanded across a refresh (add
@@ -436,9 +449,12 @@ async function loadOpenRepairs() {
   const openIds = new Set(
     [...el.querySelectorAll("details.repair-card[open]")].map((d) => d.dataset.id),
   );
-  el.className = "";
-  el.innerHTML = "Memuat...";
+  if (!openRepairsLoaded) {
+    el.className = "";
+    el.innerHTML = "Memuat...";
+  }
   const { repairs } = await call("list_open_repairs");
+  openRepairsLoaded = true;
   if (!repairs || repairs.length === 0) {
     el.className = "empty";
     el.innerHTML = "Tidak ada servis yang sedang berjalan.";
@@ -707,11 +723,16 @@ async function loadOpenRepairs() {
   });
 }
 
+let pendingSignoffLoaded = false;
+
 async function loadPendingSignoff() {
   const el = document.getElementById("list-signoff");
-  el.className = "";
-  el.innerHTML = "Memuat...";
+  if (!pendingSignoffLoaded) {
+    el.className = "";
+    el.innerHTML = "Memuat...";
+  }
   const { repairs } = await call("list_pending_signoff");
+  pendingSignoffLoaded = true;
   if (!repairs || repairs.length === 0) {
     el.className = "empty";
     el.innerHTML = "Tidak ada servis menunggu sign-off.";
@@ -773,6 +794,14 @@ document.querySelectorAll(".tab").forEach((tab) => {
   } catch (e) {
     toast("Gagal memuat data: " + e.message);
   }
+  // Eager prefetch (2026-09-02): fire these now, not on first tab
+  // click, so by the time the mechanic actually taps Diperbaiki/
+  // Sign-off the list is very likely already cached -- see the
+  // loaded-flag comment above loadOpenRepairs. Not awaited: the
+  // "Lapor Baru" screen (already visible) shouldn't wait on tabs the
+  // mechanic hasn't opened yet.
+  loadOpenRepairs().catch(() => {});
+  loadPendingSignoff().catch(() => {});
 })();
 </script>
 </body>
