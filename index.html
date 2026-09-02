@@ -74,16 +74,23 @@
     background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
     margin-bottom: 12px; overflow: hidden;
   }
-  .repair-summary {
-    display: flex; align-items: center; justify-content: space-between; gap: 10px;
-    padding: 14px 16px; cursor: pointer; list-style: none;
-  }
+  /* display:flex directly on <summary> is unreliable in Safari (real bug,
+     confirmed 2026-09-03: iPad reported left-alignment broken here while
+     Android was fine, and Android/Chromium is the only engine that
+     reliably flexes a <summary> element itself). The flex layout lives
+     on .repair-summary-row, an ordinary <div> inside the summary, instead
+     -- <summary> itself just needs list-style:none + the marker hidden,
+     both of which DO work consistently across engines. */
+  .repair-summary { display: block; padding: 14px 16px; cursor: pointer; list-style: none; }
   .repair-summary::-webkit-details-marker { display: none; }
-  .repair-summary::after {
+  .repair-summary-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  }
+  .repair-summary-row::after {
     content: "\25B8"; color: var(--muted); font-size: 12px; flex-shrink: 0;
     transition: transform 0.15s;
   }
-  .repair-card[open] .repair-summary::after { transform: rotate(90deg); }
+  .repair-card[open] .repair-summary-row::after { transform: rotate(90deg); }
   .repair-summary .truck-id { font-family: var(--mono); color: var(--accent); font-weight: 600; }
   .repair-summary-meta {
     font-size: 13px; color: var(--muted); text-align: right; overflow: hidden;
@@ -108,11 +115,11 @@
   }
   .issue-row { padding: 6px 0; font-size: 14px; }
   details.add-issue summary {
-    color: var(--accent); font-size: 13px; font-weight: 600; cursor: pointer; list-style: none;
+    display: block; color: var(--accent); font-size: 13px; font-weight: 600; cursor: pointer; list-style: none;
   }
   details.add-issue summary::-webkit-details-marker { display: none; }
   details.add-issue[open] summary { margin-bottom: 4px; }
-  .issue-edit summary { cursor: pointer; list-style: none; }
+  .issue-edit summary { display: block; cursor: pointer; list-style: none; }
   .issue-edit summary::-webkit-details-marker { display: none; }
   .issue-edit[open] summary { color: var(--accent); }
   .issue-edit-actions { display: flex; gap: 8px; margin-top: 10px; }
@@ -484,8 +491,10 @@ function renderOpenRepairs(repairs) {
       return `
       <details class="repair-card" data-id="${r.id}" ${openIds.has(r.id) ? "open" : ""}>
         <summary class="repair-summary">
-          <span class="truck-id">Truk ${r.truck_id}</span>
-          <span class="repair-summary-meta">Servis #${r.seq} &middot; ${issueCount} masalah${loc ? " &middot; " + loc : ""}</span>
+          <div class="repair-summary-row">
+            <span class="truck-id">Truk ${r.truck_id}</span>
+            <span class="repair-summary-meta">Servis #${r.seq} &middot; ${issueCount} masalah${loc ? " &middot; " + loc : ""}</span>
+          </div>
         </summary>
         <div class="repair-body">
         <div class="card-meta">Mulai ${formatDate(r.downtime_start)}</div>
