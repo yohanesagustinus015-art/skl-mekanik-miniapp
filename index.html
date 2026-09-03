@@ -227,6 +227,50 @@ function failureModeOptions(selected) {
     .join("");
 }
 
+function categoryOfFailureMode(id) {
+  const f = catalogs.failureModes.find((x) => x.id === id);
+  return f ? f.category : null;
+}
+
+// 2026-09-03, direct instruction: 10-wheel layout confirmed uniform
+// across the fleet (2 front singles + 2 rear tandem axles, dual on
+// both sides) -- matches repair_record_issues.wheel_position's real
+// codes and the truck diagram's own hotspot keys in skl-route-agent's
+// dashboard.html (hand-kept in sync, same convention as every other
+// shared label map across these codebases).
+const WHEEL_POSITION_LABELS = {
+  FL: "Depan kiri", FR: "Depan kanan",
+  RL1_OUT: "Belakang kiri 1 (luar)", RL1_IN: "Belakang kiri 1 (dalam)",
+  RR1_OUT: "Belakang kanan 1 (luar)", RR1_IN: "Belakang kanan 1 (dalam)",
+  RL2_OUT: "Belakang kiri 2 (luar)", RL2_IN: "Belakang kiri 2 (dalam)",
+  RR2_OUT: "Belakang kanan 2 (luar)", RR2_IN: "Belakang kanan 2 (dalam)",
+};
+function wheelPositionOptions(selected) {
+  return `<option value="">(pilih posisi roda)</option>` + Object.entries(WHEEL_POSITION_LABELS)
+    .map(([code, label]) => `<option value="${code}" ${code === selected ? "selected" : ""}>${label}</option>`)
+    .join("");
+}
+
+// Toggles the wheel-position <select> / chassis-position <input>
+// next to a Jenis kerusakan <select>, based on the currently chosen
+// failure mode's category -- both live in the same .issue-position-
+// fields wrapper right after the fm select, direct instruction
+// 2026-09-03 (wheel: "the truck should have all 10 wheels clickable
+// too, with the history of replacements" -- needs mechanics to
+// actually tag which wheel; chassis: "indicate where on the chassis
+// we already [repaired] when retak").
+function syncPositionFields(fmSelect) {
+  // .issue-position-fields is a SIBLING of .issue-fm-row, not a
+  // descendant -- both new-issue and edit-issue markup wrap them in a
+  // common <details> (.add-issue / .issue-edit respectively), so look
+  // there instead of inside the row itself.
+  const wrapper = fmSelect.closest("details").querySelector(".issue-position-fields");
+  if (!wrapper) return;
+  const category = categoryOfFailureMode(fmSelect.value);
+  wrapper.querySelector(".issue-wheel-position").style.display = category === "ban" ? "block" : "none";
+  wrapper.querySelector(".issue-chassis-position").style.display = category === "chassis" ? "block" : "none";
+}
+
 function locationOptions(selected) {
   return Object.keys(LOCATION_LABELS)
     .map((k) => `<option value="${k}" ${k === selected ? "selected" : ""}>${LOCATION_LABELS[k]}</option>`)
@@ -249,11 +293,18 @@ function editableIssueRowHtml(issue) {
   const fm = issue.failure_modes ? issue.failure_modes.name : "(lainnya)";
   const desc = issue.description ? " -- " + issue.description : "";
   const badge = `<span class="issue-status-badge">${ISSUE_STATUS_LABELS[issue.status] || issue.status}</span>`;
+  const category = issue.failure_modes ? issue.failure_modes.category : null;
   return `
     <details class="issue-edit" data-issue-id="${issue.id}">
       <summary class="issue-row">${fm}${desc}${badge}</summary>
-      <label>Jenis kerusakan</label>
-      <select class="edit-issue-fm">${failureModeOptions(issue.failure_mode_id)}</select>
+      <div class="issue-fm-row">
+        <label>Jenis kerusakan</label>
+        <select class="edit-issue-fm">${failureModeOptions(issue.failure_mode_id)}</select>
+      </div>
+      <div class="issue-position-fields">
+        <select class="edit-issue-wheel issue-wheel-position" style="display:${category === "ban" ? "block" : "none"}">${wheelPositionOptions(issue.wheel_position)}</select>
+        <input type="text" class="edit-issue-chassis issue-chassis-position" style="display:${category === "chassis" ? "block" : "none"}" placeholder="Posisi di chassis (mis. kiri, dekat as depan)" value="${issue.chassis_position || ""}" />
+      </div>
       <label>Deskripsi</label>
       <textarea class="edit-issue-desc" placeholder="Jelaskan kerusakan yang ditemukan...">${issue.description || ""}</textarea>
       <div class="issue-edit-actions">
@@ -517,8 +568,14 @@ function renderOpenRepairs(repairs) {
         </div>
         <details class="add-issue card-section">
           <summary>+ Tambah masalah</summary>
-          <label>Jenis kerusakan</label>
-          <select class="new-issue-fm">${failureModeOptions()}</select>
+          <div class="issue-fm-row">
+            <label>Jenis kerusakan</label>
+            <select class="new-issue-fm">${failureModeOptions()}</select>
+          </div>
+          <div class="issue-position-fields">
+            <select class="new-issue-wheel issue-wheel-position" style="display:none">${wheelPositionOptions()}</select>
+            <input type="text" class="new-issue-chassis issue-chassis-position" style="display:none" placeholder="Posisi di chassis (mis. kiri, dekat as depan)" />
+          </div>
           <label>Deskripsi</label>
           <textarea class="new-issue-desc" placeholder="Jelaskan kerusakan yang ditemukan..."></textarea>
           <button class="btn-add-issue">Tambah</button>
@@ -564,6 +621,10 @@ function renderOpenRepairs(repairs) {
     });
   });
 
+  el.querySelectorAll(".new-issue-fm").forEach((sel) => {
+    sel.addEventListener("change", () => syncPositionFields(sel));
+  });
+
   el.querySelectorAll(".btn-add-issue").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const card = btn.closest(".repair-card");
@@ -574,6 +635,8 @@ function renderOpenRepairs(repairs) {
           repair_record_id: card.dataset.id,
           failure_mode_id: card.querySelector(".new-issue-fm").value,
           description: card.querySelector(".new-issue-desc").value,
+          wheel_position: card.querySelector(".new-issue-wheel").value || null,
+          chassis_position: card.querySelector(".new-issue-chassis").value || null,
         });
         toast("Masalah ditambahkan.");
         if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
@@ -691,6 +754,10 @@ function renderOpenRepairs(repairs) {
     });
   });
 
+  el.querySelectorAll(".edit-issue-fm").forEach((sel) => {
+    sel.addEventListener("change", () => syncPositionFields(sel));
+  });
+
   el.querySelectorAll(".btn-save-issue").forEach((btn) => {
     btn.addEventListener("click", async (ev) => {
       ev.preventDefault();
@@ -701,6 +768,8 @@ function renderOpenRepairs(repairs) {
           id: details.dataset.issueId,
           failure_mode_id: details.querySelector(".edit-issue-fm").value,
           description: details.querySelector(".edit-issue-desc").value,
+          wheel_position: details.querySelector(".edit-issue-wheel").value || null,
+          chassis_position: details.querySelector(".edit-issue-chassis").value || null,
         });
         toast("Perubahan disimpan.");
         if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
