@@ -38,6 +38,7 @@
     margin: 4px 0 2px;
   }
   .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 18px; }
+  .fm-hint { color: var(--muted); font-size: 12px; margin-top: 4px; min-height: 16px; }
   .tabs { display: flex; gap: 4px; margin-bottom: 20px; border-bottom: 1px solid var(--border); }
   .tab {
     flex: 1; text-align: center; padding: 10px 4px; font-size: 13px; font-weight: 600;
@@ -74,23 +75,16 @@
     background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
     margin-bottom: 12px; overflow: hidden;
   }
-  /* display:flex directly on <summary> is unreliable in Safari (real bug,
-     confirmed 2026-09-03: iPad reported left-alignment broken here while
-     Android was fine, and Android/Chromium is the only engine that
-     reliably flexes a <summary> element itself). The flex layout lives
-     on .repair-summary-row, an ordinary <div> inside the summary, instead
-     -- <summary> itself just needs list-style:none + the marker hidden,
-     both of which DO work consistently across engines. */
-  .repair-summary { display: block; padding: 14px 16px; cursor: pointer; list-style: none; }
-  .repair-summary::-webkit-details-marker { display: none; }
-  .repair-summary-row {
+  .repair-summary {
     display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 14px 16px; cursor: pointer; list-style: none;
   }
-  .repair-summary-row::after {
+  .repair-summary::-webkit-details-marker { display: none; }
+  .repair-summary::after {
     content: "\25B8"; color: var(--muted); font-size: 12px; flex-shrink: 0;
     transition: transform 0.15s;
   }
-  .repair-card[open] .repair-summary-row::after { transform: rotate(90deg); }
+  .repair-card[open] .repair-summary::after { transform: rotate(90deg); }
   .repair-summary .truck-id { font-family: var(--mono); color: var(--accent); font-weight: 600; }
   .repair-summary-meta {
     font-size: 13px; color: var(--muted); text-align: right; overflow: hidden;
@@ -115,11 +109,11 @@
   }
   .issue-row { padding: 6px 0; font-size: 14px; }
   details.add-issue summary {
-    display: block; color: var(--accent); font-size: 13px; font-weight: 600; cursor: pointer; list-style: none;
+    color: var(--accent); font-size: 13px; font-weight: 600; cursor: pointer; list-style: none;
   }
   details.add-issue summary::-webkit-details-marker { display: none; }
   details.add-issue[open] summary { margin-bottom: 4px; }
-  .issue-edit summary { display: block; cursor: pointer; list-style: none; }
+  .issue-edit summary { cursor: pointer; list-style: none; }
   .issue-edit summary::-webkit-details-marker { display: none; }
   .issue-edit[open] summary { color: var(--accent); }
   .issue-edit-actions { display: flex; gap: 8px; margin-top: 10px; }
@@ -187,8 +181,9 @@
     </select>
     <label>Jenis kerusakan</label>
     <select id="f-failure-mode"></select>
+    <div class="fm-hint" id="f-fm-hint"></div>
     <label>Deskripsi</label>
-    <textarea id="f-description" placeholder="Jelaskan kerusakan yang ditemukan..."></textarea>
+    <textarea id="f-description" placeholder="Jelaskan kerusakan yang ditemukan... (mis. &quot;rem blong&quot;)"></textarea>
     <button class="primary" id="btn-create">Simpan Laporan</button>
   </div>
 
@@ -227,50 +222,6 @@ function failureModeOptions(selected) {
     .join("");
 }
 
-function categoryOfFailureMode(id) {
-  const f = catalogs.failureModes.find((x) => x.id === id);
-  return f ? f.category : null;
-}
-
-// 2026-09-03, direct instruction: 10-wheel layout confirmed uniform
-// across the fleet (2 front singles + 2 rear tandem axles, dual on
-// both sides) -- matches repair_record_issues.wheel_position's real
-// codes and the truck diagram's own hotspot keys in skl-route-agent's
-// dashboard.html (hand-kept in sync, same convention as every other
-// shared label map across these codebases).
-const WHEEL_POSITION_LABELS = {
-  FL: "Depan kiri", FR: "Depan kanan",
-  RL1_OUT: "Belakang kiri 1 (luar)", RL1_IN: "Belakang kiri 1 (dalam)",
-  RR1_OUT: "Belakang kanan 1 (luar)", RR1_IN: "Belakang kanan 1 (dalam)",
-  RL2_OUT: "Belakang kiri 2 (luar)", RL2_IN: "Belakang kiri 2 (dalam)",
-  RR2_OUT: "Belakang kanan 2 (luar)", RR2_IN: "Belakang kanan 2 (dalam)",
-};
-function wheelPositionOptions(selected) {
-  return `<option value="">(pilih posisi roda)</option>` + Object.entries(WHEEL_POSITION_LABELS)
-    .map(([code, label]) => `<option value="${code}" ${code === selected ? "selected" : ""}>${label}</option>`)
-    .join("");
-}
-
-// Toggles the wheel-position <select> / chassis-position <input>
-// next to a Jenis kerusakan <select>, based on the currently chosen
-// failure mode's category -- both live in the same .issue-position-
-// fields wrapper right after the fm select, direct instruction
-// 2026-09-03 (wheel: "the truck should have all 10 wheels clickable
-// too, with the history of replacements" -- needs mechanics to
-// actually tag which wheel; chassis: "indicate where on the chassis
-// we already [repaired] when retak").
-function syncPositionFields(fmSelect) {
-  // .issue-position-fields is a SIBLING of .issue-fm-row, not a
-  // descendant -- both new-issue and edit-issue markup wrap them in a
-  // common <details> (.add-issue / .issue-edit respectively), so look
-  // there instead of inside the row itself.
-  const wrapper = fmSelect.closest("details").querySelector(".issue-position-fields");
-  if (!wrapper) return;
-  const category = categoryOfFailureMode(fmSelect.value);
-  wrapper.querySelector(".issue-wheel-position").style.display = category === "ban" ? "block" : "none";
-  wrapper.querySelector(".issue-chassis-position").style.display = category === "chassis" ? "block" : "none";
-}
-
 function locationOptions(selected) {
   return Object.keys(LOCATION_LABELS)
     .map((k) => `<option value="${k}" ${k === selected ? "selected" : ""}>${LOCATION_LABELS[k]}</option>`)
@@ -293,18 +244,11 @@ function editableIssueRowHtml(issue) {
   const fm = issue.failure_modes ? issue.failure_modes.name : "(lainnya)";
   const desc = issue.description ? " -- " + issue.description : "";
   const badge = `<span class="issue-status-badge">${ISSUE_STATUS_LABELS[issue.status] || issue.status}</span>`;
-  const category = issue.failure_modes ? issue.failure_modes.category : null;
   return `
     <details class="issue-edit" data-issue-id="${issue.id}">
       <summary class="issue-row">${fm}${desc}${badge}</summary>
-      <div class="issue-fm-row">
-        <label>Jenis kerusakan</label>
-        <select class="edit-issue-fm">${failureModeOptions(issue.failure_mode_id)}</select>
-      </div>
-      <div class="issue-position-fields">
-        <select class="edit-issue-wheel issue-wheel-position" style="display:${category === "ban" ? "block" : "none"}">${wheelPositionOptions(issue.wheel_position)}</select>
-        <input type="text" class="edit-issue-chassis issue-chassis-position" style="display:${category === "chassis" ? "block" : "none"}" placeholder="Posisi di chassis (mis. kiri, dekat as depan)" value="${issue.chassis_position || ""}" />
-      </div>
+      <label>Jenis kerusakan</label>
+      <select class="edit-issue-fm">${failureModeOptions(issue.failure_mode_id)}</select>
       <label>Deskripsi</label>
       <textarea class="edit-issue-desc" placeholder="Jelaskan kerusakan yang ditemukan...">${issue.description || ""}</textarea>
       <div class="issue-edit-actions">
@@ -318,26 +262,28 @@ function editableIssueRowHtml(issue) {
 // Sibling block, NOT inside the <details> above -- an <input>/<button>
 // inside a <summary> fights the details/summary click-to-toggle, so this
 // renders as its own always-visible row right after it instead.
+// 'reported' -> mechanic types what part's needed and submits THIS ONE
+// issue right away (per-issue, not batched -- see btn-request-parts'
+// click handler below for why).
 // 'in_progress' -> mechanic marks this one issue done once physically
-// fixed. 'done'/'verified' -> nothing left to do here; someone else
-// (staff/owner) or the cascade from sign_off owns everything past that.
-//
-// Redefined 2026-09-03, direct instruction: "permintaan suku cadang
-// needs to be allowed multiple times for each issue, in case they
-// forget to type something -- even while sedang dikerjakan, they
-// should still have a place to raise additional sparepart requests."
-// Was previously one early-return per status (request-parts OR the
-// status-specific action, never both, and only ever at 'reported').
-// Now composes blocks together: whatever status-specific action
-// applies (vendor note/Mulai Perbaikan, Tandai Selesai) PLUS an
-// always-available "ajukan tambahan" block for any status short of
-// done/verified, showing what's already been requested so a repeat
-// submission reads as adding to it, not replacing it.
+// fixed. Anything else (request_for_parts/vendor_selected/done/verified)
+// is read-only here -- someone else (staff/owner) or the cascade from
+// sign_off owns that transition.
 function issueActionsHtml(issue) {
-  if (issue.status === "done" || issue.status === "verified") return "";
-
-  const blocks = [];
-
+  if (issue.status === "reported") {
+    // Per-issue submit (2026-08-30, direct feedback while testing --
+    // previously one bulk button for the whole session, which had a real
+    // bug: leaving a NOT-yet-diagnosed masalah's input blank looked
+    // identical to "genuinely no part needed" and wrongly fast-forwarded
+    // it to in_progress. Each masalah is now its own deliberate decision.
+    return `
+      <div class="issue-actions" data-issue-id="${issue.id}">
+        <label>Suku cadang dibutuhkan (kosongkan jika tidak perlu beli apa-apa)</label>
+        <input type="text" class="issue-parts-needed" placeholder="mis. aki, kampas rem" />
+        <button class="btn-request-parts">Ajukan Permintaan Suku Cadang</button>
+      </div>
+    `;
+  }
   if (issue.status === "vendor_selected") {
     // 2026-08-31, direct feedback: "let dispatcher/mechanic be able to
     // say mulai perbaikan when parts arrive" -- only show the button
@@ -346,31 +292,28 @@ function issueActionsHtml(issue) {
     const quotes = issue.vendor_quotes || [];
     const approved = quotes.find((q) => q.is_selected && q.approved_by_owner);
     if (approved) {
-      blocks.push(`
-        <div class="issue-vendor-note">Vendor: ${approved.vendor_name} -- sudah disetujui</div>
-        <button class="btn-start-progress">Mulai Perbaikan (Part Sudah Sampai)</button>
-      `);
-    } else {
-      const selected = quotes.find((q) => q.is_selected);
-      blocks.push(`
-        <div class="issue-vendor-note">${selected ? "Menunggu persetujuan pemilik: " + selected.vendor_name : "Menunggu staff memilih vendor"}</div>
-      `);
+      return `
+        <div class="issue-actions" data-issue-id="${issue.id}">
+          <div class="issue-vendor-note">Vendor: ${approved.vendor_name} -- sudah disetujui</div>
+          <button class="btn-start-progress">Mulai Perbaikan (Part Sudah Sampai)</button>
+        </div>
+      `;
     }
+    const selected = quotes.find((q) => q.is_selected);
+    return `
+      <div class="issue-actions" data-issue-id="${issue.id}">
+        <div class="issue-vendor-note">${selected ? "Menunggu persetujuan pemilik: " + selected.vendor_name : "Menunggu staff memilih vendor"}</div>
+      </div>
+    `;
   }
-
   if (issue.status === "in_progress") {
-    blocks.push(`<button class="btn-issue-done">Tandai Masalah Ini Selesai</button>`);
+    return `
+      <div class="issue-actions" data-issue-id="${issue.id}">
+        <button class="btn-issue-done">Tandai Masalah Ini Selesai</button>
+      </div>
+    `;
   }
-
-  const already = issue.parts_used ? `<div class="issue-vendor-note">Sudah diajukan: ${issue.parts_used}</div>` : "";
-  blocks.push(`
-    ${already}
-    <label>${issue.parts_used ? "Tambah suku cadang lain (opsional)" : "Suku cadang dibutuhkan (kosongkan jika tidak perlu beli apa-apa)"}</label>
-    <input type="text" class="issue-parts-needed" placeholder="mis. aki, kampas rem" />
-    <button class="btn-request-parts">${issue.parts_used ? "Ajukan Tambahan" : "Ajukan Permintaan Suku Cadang"}</button>
-  `);
-
-  return `<div class="issue-actions" data-issue-id="${issue.id}">${blocks.join("")}</div>`;
+  return "";
 }
 
 // Videos can't go through canvas resize like photos can -- this pipeline
@@ -454,10 +397,6 @@ function setScreen(name) {
 
 async function loadCatalogs() {
   const { failureModes, vendors, trucks } = await call("list_catalogs");
-  renderCatalogs({ failureModes, vendors, trucks });
-}
-
-function renderCatalogs({ failureModes, vendors, trucks }) {
   catalogs = { failureModes: failureModes || [], vendors: vendors || [], trucks: trucks || [] };
 
   const truckSel = document.getElementById("f-truck");
@@ -470,6 +409,42 @@ function renderCatalogs({ failureModes, vendors, trucks }) {
     .map((f) => `<option value="${f.id}">${f.name}</option>`)
     .join("");
 }
+
+// Direct feedback, 2026-09-09: "report can start with rem blong, but
+// somehow we need to categorize failure modes." Typing a description
+// (debounced -- one call per pause in typing, not per keystroke) asks
+// mekanik-api's classify_failure_mode to suggest the matching Jenis
+// kerusakan entry and auto-selects it. Still just a suggestion --
+// the dropdown stays a normal, fully manual-editable select, and the
+// hint text says so explicitly so a mechanic doesn't mistake this for
+// something locked in. A blank/failed classification silently leaves
+// the dropdown at whatever it already was (its own default, or a
+// mechanic's prior manual pick) -- never blocks or resets the form.
+function wireFailureModeSuggest(descId, selId, hintId) {
+  const descEl = document.getElementById(descId);
+  const selEl = document.getElementById(selId);
+  const hintEl = document.getElementById(hintId);
+  if (!descEl || !selEl) return;
+  let timer = null;
+  descEl.addEventListener("input", () => {
+    if (timer) clearTimeout(timer);
+    const text = descEl.value.trim();
+    if (text.length < 4) { if (hintEl) hintEl.textContent = ""; return; }
+    timer = setTimeout(async () => {
+      try {
+        const { failure_mode_id, confidence } = await call("classify_failure_mode", { description: text });
+        if (!failure_mode_id || confidence === "none") { if (hintEl) hintEl.textContent = ""; return; }
+        const match = catalogs.failureModes.find((f) => f.id === failure_mode_id);
+        if (!match) return;
+        selEl.value = failure_mode_id;
+        if (hintEl) hintEl.textContent = "🤖 Terdeteksi: " + match.name + " -- ubah di atas jika salah";
+      } catch (e) {
+        // Silent -- a failed suggestion never blocks manual selection.
+      }
+    }, 800);
+  });
+}
+wireFailureModeSuggest("f-description", "f-failure-mode", "f-fm-hint");
 
 document.getElementById("btn-create").addEventListener("click", async () => {
   const btn = document.getElementById("btn-create");
@@ -491,33 +466,7 @@ document.getElementById("btn-create").addEventListener("click", async () => {
   }
 });
 
-// Direct feedback, 2026-09-02: "Diperbaiki" tab felt slow to open.
-// Measured -- the actual DB query is sub-millisecond even fully
-// joined, so it isn't a data/index problem, it's the fixed cost of
-// one Edge Function round trip (network + cold start), unavoidable
-// per-call. Can't make the call itself faster, so hide it instead:
-// track whether this list has ever loaded, and only show the
-// "Memuat..." wipe-and-wait on the very first load. Every load after
-// that (including the eager prefetch at init, see bottom of file)
-// keeps showing the last-known list while quietly refreshing behind
-// it -- switching to the tab feels instant even though the network
-// call is still happening.
-let openRepairsLoaded = false;
-
 async function loadOpenRepairs() {
-  const el = document.getElementById("list-open");
-  if (!openRepairsLoaded) {
-    el.className = "";
-    el.innerHTML = "Memuat...";
-  }
-  const { repairs } = await call("list_open_repairs");
-  renderOpenRepairs(repairs);
-}
-
-// Split out of loadOpenRepairs (2026-09-02) so the combined init_data
-// prefetch can render bundled data straight away without a second
-// network call just to re-fetch what it already has.
-function renderOpenRepairs(repairs) {
   const el = document.getElementById("list-open");
   // Preserve which cards were already expanded across a refresh (add
   // issue / update location / etc. all reload this list) -- otherwise
@@ -525,21 +474,14 @@ function renderOpenRepairs(repairs) {
   const openIds = new Set(
     [...el.querySelectorAll("details.repair-card[open]")].map((d) => d.dataset.id),
   );
-  openRepairsLoaded = true;
+  el.className = "";
+  el.innerHTML = "Memuat...";
+  const { repairs } = await call("list_open_repairs");
   if (!repairs || repairs.length === 0) {
     el.className = "empty";
     el.innerHTML = "Tidak ada servis yang sedang berjalan.";
     return;
   }
-  // Real bug, found 2026-09-03 from a screenshot: className was only
-  // ever reset to "" before the FIRST-ever fetch (see the loading-
-  // state branch in loadOpenRepairs). If the list was empty at some
-  // point after that (className left as "empty", which text-aligns
-  // center) and later got real content, this branch overwrote
-  // innerHTML but never cleared className -- so the centered .empty
-  // style stuck around a real, populated list. Explains a report of
-  // "text not left-aligned" that had nothing to do with the device.
-  el.className = "";
   el.innerHTML = repairs
     .map((r) => {
       const issues = r.repair_record_issues || [];
@@ -552,10 +494,8 @@ function renderOpenRepairs(repairs) {
       return `
       <details class="repair-card" data-id="${r.id}" ${openIds.has(r.id) ? "open" : ""}>
         <summary class="repair-summary">
-          <div class="repair-summary-row">
-            <span class="truck-id">Truk ${r.truck_id}</span>
-            <span class="repair-summary-meta">Servis #${r.seq} &middot; ${issueCount} masalah${loc ? " &middot; " + loc : ""}</span>
-          </div>
+          <span class="truck-id">Truk ${r.truck_id}</span>
+          <span class="repair-summary-meta">Servis #${r.seq} &middot; ${issueCount} masalah${loc ? " &middot; " + loc : ""}</span>
         </summary>
         <div class="repair-body">
         <div class="card-meta">Mulai ${formatDate(r.downtime_start)}</div>
@@ -568,16 +508,11 @@ function renderOpenRepairs(repairs) {
         </div>
         <details class="add-issue card-section">
           <summary>+ Tambah masalah</summary>
-          <div class="issue-fm-row">
-            <label>Jenis kerusakan</label>
-            <select class="new-issue-fm">${failureModeOptions()}</select>
-          </div>
-          <div class="issue-position-fields">
-            <select class="new-issue-wheel issue-wheel-position" style="display:none">${wheelPositionOptions()}</select>
-            <input type="text" class="new-issue-chassis issue-chassis-position" style="display:none" placeholder="Posisi di chassis (mis. kiri, dekat as depan)" />
-          </div>
+          <label>Jenis kerusakan</label>
+          <select class="new-issue-fm">${failureModeOptions()}</select>
+          <div class="fm-hint new-issue-fm-hint"></div>
           <label>Deskripsi</label>
-          <textarea class="new-issue-desc" placeholder="Jelaskan kerusakan yang ditemukan..."></textarea>
+          <textarea class="new-issue-desc" placeholder="Jelaskan kerusakan yang ditemukan... (mis. &quot;rem blong&quot;)"></textarea>
           <button class="btn-add-issue">Tambah</button>
         </details>
         <div class="card-section photo-row">
@@ -621,8 +556,31 @@ function renderOpenRepairs(repairs) {
     });
   });
 
-  el.querySelectorAll(".new-issue-fm").forEach((sel) => {
-    sel.addEventListener("change", () => syncPositionFields(sel));
+  // Same suggestion behavior as Lapor Baru's Deskripsi field (see
+  // wireFailureModeSuggest), wired per-card here since "+ Tambah
+  // masalah" is a repeated element, not a single fixed id.
+  el.querySelectorAll(".new-issue-desc").forEach((descEl) => {
+    const card = descEl.closest(".add-issue");
+    const selEl = card.querySelector(".new-issue-fm");
+    const hintEl = card.querySelector(".new-issue-fm-hint");
+    let timer = null;
+    descEl.addEventListener("input", () => {
+      if (timer) clearTimeout(timer);
+      const text = descEl.value.trim();
+      if (text.length < 4) { hintEl.textContent = ""; return; }
+      timer = setTimeout(async () => {
+        try {
+          const { failure_mode_id, confidence } = await call("classify_failure_mode", { description: text });
+          if (!failure_mode_id || confidence === "none") { hintEl.textContent = ""; return; }
+          const match = catalogs.failureModes.find((f) => f.id === failure_mode_id);
+          if (!match) return;
+          selEl.value = failure_mode_id;
+          hintEl.textContent = "🤖 Terdeteksi: " + match.name + " -- ubah di atas jika salah";
+        } catch (e) {
+          // Silent -- a failed suggestion never blocks manual selection.
+        }
+      }, 800);
+    });
   });
 
   el.querySelectorAll(".btn-add-issue").forEach((btn) => {
@@ -635,8 +593,6 @@ function renderOpenRepairs(repairs) {
           repair_record_id: card.dataset.id,
           failure_mode_id: card.querySelector(".new-issue-fm").value,
           description: card.querySelector(".new-issue-desc").value,
-          wheel_position: card.querySelector(".new-issue-wheel").value || null,
-          chassis_position: card.querySelector(".new-issue-chassis").value || null,
         });
         toast("Masalah ditambahkan.");
         if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
@@ -754,10 +710,6 @@ function renderOpenRepairs(repairs) {
     });
   });
 
-  el.querySelectorAll(".edit-issue-fm").forEach((sel) => {
-    sel.addEventListener("change", () => syncPositionFields(sel));
-  });
-
   el.querySelectorAll(".btn-save-issue").forEach((btn) => {
     btn.addEventListener("click", async (ev) => {
       ev.preventDefault();
@@ -768,8 +720,6 @@ function renderOpenRepairs(repairs) {
           id: details.dataset.issueId,
           failure_mode_id: details.querySelector(".edit-issue-fm").value,
           description: details.querySelector(".edit-issue-desc").value,
-          wheel_position: details.querySelector(".edit-issue-wheel").value || null,
-          chassis_position: details.querySelector(".edit-issue-chassis").value || null,
         });
         toast("Perubahan disimpan.");
         if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
@@ -819,29 +769,16 @@ function renderOpenRepairs(repairs) {
   });
 }
 
-let pendingSignoffLoaded = false;
-
 async function loadPendingSignoff() {
   const el = document.getElementById("list-signoff");
-  if (!pendingSignoffLoaded) {
-    el.className = "";
-    el.innerHTML = "Memuat...";
-  }
+  el.className = "";
+  el.innerHTML = "Memuat...";
   const { repairs } = await call("list_pending_signoff");
-  renderPendingSignoff(repairs);
-}
-
-function renderPendingSignoff(repairs) {
-  const el = document.getElementById("list-signoff");
-  pendingSignoffLoaded = true;
   if (!repairs || repairs.length === 0) {
     el.className = "empty";
     el.innerHTML = "Tidak ada servis menunggu sign-off.";
     return;
   }
-  // Same fix as renderOpenRepairs above -- className must be reset
-  // here too, not just before the first-ever fetch.
-  el.className = "";
   el.innerHTML = repairs
     .map((r) => {
       const issues = r.repair_record_issues || [];
@@ -893,21 +830,8 @@ document.querySelectorAll(".tab").forEach((tab) => {
   document.getElementById("app").style.display = "block";
   const greetName = tg.initDataUnsafe?.user?.first_name;
   document.getElementById("mechanicName").textContent = greetName ? "Halo, " + greetName : "";
-  // Combined single request (2026-09-02): this used to be three
-  // separate calls (list_catalogs, list_open_repairs,
-  // list_pending_signoff), each paying its own Edge Function round
-  // trip -- measured, that fixed per-call overhead (network + cold
-  // start) was the real cost, not the DB work. init_data runs all
-  // five underlying queries server-side and returns them in one
-  // response, so page load pays that overhead once instead of three
-  // times. Diperbaiki/Sign-off render immediately from this same
-  // response too -- no second network call needed just to show what
-  // we already fetched.
   try {
-    const { failureModes, vendors, trucks, openRepairs, pendingSignoff } = await call("init_data");
-    renderCatalogs({ failureModes, vendors, trucks });
-    renderOpenRepairs(openRepairs);
-    renderPendingSignoff(pendingSignoff);
+    await loadCatalogs();
   } catch (e) {
     toast("Gagal memuat data: " + e.message);
   }
