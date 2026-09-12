@@ -193,6 +193,17 @@
     padding: 10px 12px; margin-bottom: 4px; font-size: 13.5px; font-weight: 600; color: var(--accent);
   }
   #diagram-summary .diagram-change { padding: 0; }
+
+  /* Report-kind fork (Ada Masalah vs Servis Rutin) -- the very first
+     choice on Lapor Baru, see the HTML comment above it. */
+  .report-kind-fork { display: flex; flex-direction: column; gap: 10px; margin-bottom: 4px; }
+  .report-kind-btn {
+    padding: 18px 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface);
+    color: var(--text); font-size: 16px; font-weight: 600; text-align: left; cursor: pointer;
+  }
+  .report-kind-btn:active { background: var(--accent-dim); border-color: var(--accent); }
+  #r-quantity-row { display: none; }
+  #r-quantity-row.visible { display: block; }
 </style>
 </head>
 <body>
@@ -212,6 +223,24 @@
   </div>
 
   <div class="screen active" id="screen-new">
+    <!--
+      Direct instruction, 2026-09-12: routine service (oil/filter/brake-
+      fluid changes, tarp) was only ever logged through the failure-mode
+      picker below because this app had no other door into it -- a
+      category error (answers "what work was done", not "what's wrong")
+      that poisons any later failure-rate analysis. This fork asks which
+      question a mechanic is actually answering BEFORE anything else,
+      since they already know which one it is the moment they open the
+      app -- "something broke" and "I'm doing scheduled service" are two
+      completely different mental modes, not a detail to infer afterward.
+    -->
+    <div class="report-kind-fork" id="report-kind-fork">
+      <button type="button" class="report-kind-btn" id="btn-kind-masalah">🔧 Ada Masalah/Kerusakan</button>
+      <button type="button" class="report-kind-btn" id="btn-kind-rutin">🛠️ Servis Rutin</button>
+    </div>
+
+    <div id="new-masalah-form" style="display:none">
+    <button type="button" class="diagram-change" id="btn-kind-back-1" style="margin:0 0 8px">&larr; Ganti jenis laporan</button>
     <label>Truk</label>
     <select id="f-truck"></select>
     <label>Lokasi</label>
@@ -255,6 +284,31 @@
     <label>Deskripsi</label>
     <textarea id="f-description" placeholder="Jelaskan kerusakan yang ditemukan... (mis. &quot;rem blong&quot;)"></textarea>
     <button class="primary" id="btn-create">Simpan Laporan</button>
+    </div>
+
+    <div id="new-rutin-form" style="display:none">
+      <button type="button" class="diagram-change" id="btn-kind-back-2" style="margin:0 0 8px">&larr; Ganti jenis laporan</button>
+      <label>Truk</label>
+      <select id="r-truck"></select>
+      <label>Item</label>
+      <select id="r-item-type">
+        <option value="filter_solar">Filter solar</option>
+        <option value="oli_mesin">Oli mesin</option>
+        <option value="minyak_rem">Minyak rem</option>
+        <option value="terpal">Terpal</option>
+      </select>
+      <label>Tanggal</label>
+      <input type="date" id="r-performed-at" />
+      <!-- Quantity only makes sense for the two fluids -- toggled by
+           r-item-type's own change handler, see wireRutinForm below. -->
+      <div id="r-quantity-row">
+        <label>Jumlah (liter, opsional)</label>
+        <input type="number" id="r-quantity" step="0.1" min="0" placeholder="mis. 8" />
+      </div>
+      <label>Catatan (opsional)</label>
+      <textarea id="r-notes" placeholder="mis. merk oli, kondisi terpal, dll."></textarea>
+      <button class="primary" id="btn-create-rutin">Simpan Servis Rutin</button>
+    </div>
   </div>
 
   <div class="screen" id="screen-done">
@@ -469,10 +523,11 @@ async function loadCatalogs() {
   const { failureModes, vendors, trucks } = await call("list_catalogs");
   catalogs = { failureModes: failureModes || [], vendors: vendors || [], trucks: trucks || [] };
 
-  const truckSel = document.getElementById("f-truck");
-  truckSel.innerHTML = catalogs.trucks
+  const truckOptionsHtml = catalogs.trucks
     .map((t) => `<option value="${t.id}">${t.nickname || t.plate || t.id}</option>`)
     .join("");
+  document.getElementById("f-truck").innerHTML = truckOptionsHtml;
+  document.getElementById("r-truck").innerHTML = truckOptionsHtml;
 
   const fmSel = document.getElementById("f-failure-mode");
   fmSel.innerHTML = catalogs.failureModes
@@ -941,6 +996,63 @@ document.getElementById("btn-create").addEventListener("click", async () => {
     document.getElementById("diagram-skip-note").style.display = "none";
     document.getElementById("diagram-picker").style.display = "block";
     renderDiagram();
+  } catch (e) {
+    toast("Gagal: " + e.message);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// Report-kind fork -- see the HTML comment above #report-kind-fork.
+// Both forms stay in the DOM the whole time (simpler than tearing down/
+// rebuilding); this just toggles which one is visible. Neither "back"
+// button resets the OTHER form's own state -- deliberately, in case a
+// mechanic taps back by mistake and wants to resume where they left off.
+function showReportKindFork() {
+  document.getElementById("report-kind-fork").style.display = "flex";
+  document.getElementById("new-masalah-form").style.display = "none";
+  document.getElementById("new-rutin-form").style.display = "none";
+}
+function showMasalahForm() {
+  document.getElementById("report-kind-fork").style.display = "none";
+  document.getElementById("new-masalah-form").style.display = "block";
+}
+function showRutinForm() {
+  document.getElementById("report-kind-fork").style.display = "none";
+  document.getElementById("new-rutin-form").style.display = "block";
+  const dateEl = document.getElementById("r-performed-at");
+  if (!dateEl.value) dateEl.value = new Date().toISOString().slice(0, 10);
+  updateQuantityRowVisibility();
+}
+function updateQuantityRowVisibility() {
+  const itemType = document.getElementById("r-item-type").value;
+  document.getElementById("r-quantity-row").classList.toggle("visible", itemType === "oli_mesin" || itemType === "minyak_rem");
+}
+document.getElementById("btn-kind-masalah").addEventListener("click", showMasalahForm);
+document.getElementById("btn-kind-rutin").addEventListener("click", showRutinForm);
+document.getElementById("btn-kind-back-1").addEventListener("click", showReportKindFork);
+document.getElementById("btn-kind-back-2").addEventListener("click", showReportKindFork);
+document.getElementById("r-item-type").addEventListener("change", updateQuantityRowVisibility);
+
+document.getElementById("btn-create-rutin").addEventListener("click", async () => {
+  const btn = document.getElementById("btn-create-rutin");
+  btn.disabled = true;
+  try {
+    const itemType = document.getElementById("r-item-type").value;
+    const showsQuantity = itemType === "oli_mesin" || itemType === "minyak_rem";
+    await call("add_routine_maintenance", {
+      truck_id: document.getElementById("r-truck").value,
+      item_type: itemType,
+      performed_at: document.getElementById("r-performed-at").value,
+      quantity: showsQuantity ? (document.getElementById("r-quantity").value || null) : null,
+      unit: showsQuantity ? "liter" : null,
+      notes: document.getElementById("r-notes").value,
+    });
+    toast("Servis rutin dicatat.");
+    if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
+    document.getElementById("r-quantity").value = "";
+    document.getElementById("r-notes").value = "";
+    showReportKindFork();
   } catch (e) {
     toast("Gagal: " + e.message);
   } finally {
