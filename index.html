@@ -358,6 +358,23 @@ function failureModeOptions(selected) {
     .join("");
 }
 
+// Direct instruction, 2026-09-12: Ganti filter oli/Ganti filter solar/
+// Ganti minyak rem now have a real home (Servis Rutin) -- they answer
+// "what work was done", not "what's wrong", and mixing them into a
+// failure report poisons any later failure-rate analysis. Excluded
+// from every picker where a mechanic logs a NEW problem (Lapor Baru,
+// + Tambah masalah). Deliberately NOT filtered out of
+// failureModeOptions() above -- an OLD issue logged under one of these
+// before Servis Rutin existed must stay editable/viewable as-is, not
+// silently lose its own value out of the edit dropdown.
+const ROUTINE_FM_NAMES = ["Ganti filter oli", "Ganti filter solar", "Ganti oli mesin", "Ganti minyak rem"];
+function newIssueFailureModes() {
+  return catalogs.failureModes.filter((f) => !ROUTINE_FM_NAMES.includes(f.name));
+}
+function newFailureModeOptions() {
+  return newIssueFailureModes().map((f) => `<option value="${f.id}">${f.name}</option>`).join("");
+}
+
 function locationOptions(selected) {
   return Object.keys(LOCATION_LABELS)
     .map((k) => `<option value="${k}" ${k === selected ? "selected" : ""}>${LOCATION_LABELS[k]}</option>`)
@@ -541,10 +558,7 @@ async function loadCatalogs() {
   document.getElementById("f-truck").innerHTML = truckOptionsHtml;
   document.getElementById("r-truck").innerHTML = truckOptionsHtml;
 
-  const fmSel = document.getElementById("f-failure-mode");
-  fmSel.innerHTML = catalogs.failureModes
-    .map((f) => `<option value="${f.id}">${f.name}</option>`)
-    .join("");
+  document.getElementById("f-failure-mode").innerHTML = newFailureModeOptions();
 }
 
 // ---- Truck diagram picker (Lapor Baru) --------------------------------
@@ -800,13 +814,12 @@ function diagramFindFmId(name) {
 }
 
 function diagramResetFmOptions() {
-  const fmSel = document.getElementById("f-failure-mode");
-  fmSel.innerHTML = catalogs.failureModes.map((f) => `<option value="${f.id}">${f.name}</option>`).join("");
+  document.getElementById("f-failure-mode").innerHTML = newFailureModeOptions();
 }
 
 function diagramApplyResult() {
   const fmSel = document.getElementById("f-failure-mode");
-  let list = catalogs.failureModes;
+  let list = newIssueFailureModes();
   if (diagramState.categoryFilter) list = list.filter((f) => f.category === diagramState.categoryFilter);
   fmSel.innerHTML = list.map((f) => `<option value="${f.id}">${f.name}</option>`).join("");
   if (diagramState.resolvedFm) {
@@ -1195,7 +1208,7 @@ async function loadOpenRepairs() {
         <details class="add-issue card-section">
           <summary>+ Tambah masalah</summary>
           <label>Jenis kerusakan</label>
-          <select class="new-issue-fm">${failureModeOptions()}</select>
+          <select class="new-issue-fm">${newFailureModeOptions()}</select>
           <div class="fm-hint new-issue-fm-hint"></div>
           <label>Deskripsi</label>
           <textarea class="new-issue-desc" placeholder="Jelaskan kerusakan yang ditemukan... (mis. &quot;rem blong&quot;)"></textarea>
