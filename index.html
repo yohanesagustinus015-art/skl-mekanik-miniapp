@@ -648,8 +648,8 @@ const DIAGRAM_SCREENS = {
       { fm: "Shockbreaker rusak", id: "shock-1", label: "Shock 1", left: "32.7%", top: "18%" },
       { fm: "Per/suspensi patah", id: "per-2", label: "Per 2", left: "62.4%", top: "51.8%" },
       { fm: "Shockbreaker rusak", id: "shock-2", label: "Shock 2", left: "71.7%", top: "34.7%" },
-      { fm: "Kampas rem habis", id: "rem-1", label: "Rem 1", left: "19%", top: "46.5%" },
-      { fm: "Kampas rem habis", id: "rem-2", label: "Rem 2", left: "86%", top: "57%" },
+      { gate: "detail-rem", id: "rem-1", label: "Rem 1", left: "19%", top: "46.5%" },
+      { gate: "detail-rem", id: "rem-2", label: "Rem 2", left: "86%", top: "57%" },
     ],
   },
   "chassis-rear": {
@@ -664,17 +664,38 @@ const DIAGRAM_SCREENS = {
   "chassis-tandem1": {
     title: "Per & Rem - Axle Tandem 1", src: dimg("truck-chassis-rear-tandem-side.jpg"), alt: "Detail per dan rem tandem 1",
     parts: [
-      { fm: "Kampas rem habis", id: "rem-3", label: "Rem 3", left: "42%", top: "58%" },
+      { gate: "detail-rem", id: "rem-3", label: "Rem 3", left: "42%", top: "58%" },
       { fm: "Per/suspensi patah", id: "per-3", label: "Per 3", left: "52%", top: "29%" },
-      { fm: "Kampas rem habis", id: "rem-4", label: "Rem 4", left: "77%", top: "55%" },
+      { gate: "detail-rem", id: "rem-4", label: "Rem 4", left: "77%", top: "55%" },
     ],
   },
   "chassis-tandem2": {
     title: "Per & Rem - Axle Tandem 2", src: dimg("truck-chassis-rear-axle2.jpg"), alt: "Detail per dan rem tandem 2",
     parts: [
-      { fm: "Kampas rem habis", id: "rem-5", label: "Rem 5", left: "17%", top: "68%" },
+      { gate: "detail-rem", id: "rem-5", label: "Rem 5", left: "17%", top: "68%" },
       { fm: "Per/suspensi patah", id: "per-4", label: "Per 4", left: "45%", top: "48%" },
-      { fm: "Kampas rem habis", id: "rem-6", label: "Rem 6", left: "89%", top: "46%" },
+      { gate: "detail-rem", id: "rem-6", label: "Rem 6", left: "89%", top: "46%" },
+    ],
+  },
+  // Direct instruction, 2026-09-12: a numbered Rem dot needs to offer a
+  // choice, not just auto-pick "Kampas rem habis" -- dashboard.html's
+  // own Detail Rem picture (truck-brake.jpg) shows 3 real possibilities
+  // at any wheel-end: worn pads, a blown line/cylinder, or the bearing
+  // itself. Reached only via a numbered Rem N dot (gate above), same as
+  // the dashboard's own "chassis --> numbered rem --> detail rem" rule.
+  // Deliberate improvement over the dashboard's own leaf-dot data,
+  // though: those 3 leaves there carry no id of their own (generic,
+  // not tied to a specific wheel-end), but a mechanic tapping through
+  // FROM a specific numbered Rem dot clearly knows which wheel-end it
+  // is -- so whichever of the 3 they pick here still gets tagged with
+  // that Rem N as its component_position (see diagramResolvePart),
+  // rather than discarding that information.
+  "detail-rem": {
+    title: "Detail Rem", src: dimg("truck-brake.jpg"), alt: "Detail rem",
+    parts: [
+      { fm: "Kampas rem habis", label: "Kampas rem", left: "65%", top: "67%" },
+      { fm: "Rem blong", label: "Rem blong (silinder roda)", left: "65%", top: "21%" },
+      { fm: "Bearing/laher rusak", label: "Bearing/laher", left: "15%", top: "50%" },
     ],
   },
 };
@@ -684,6 +705,15 @@ function freshDiagramState() {
   return { stack: ["root"], resolvedFm: null, resolvedLabel: null, componentPosition: null, wheelPosition: null, categoryFilter: null };
 }
 diagramState = freshDiagramState();
+
+// Holds the numbered slot (e.g. "rem-3") a "gate" hotspot was tapped
+// from, on the way to a generic detail screen (detail-rem) whose own
+// leaf parts carry no id of their own -- see the detail-rem screen's
+// comment above. Cleared any time the diagram is showing a screen
+// OTHER than the one it was set for (renderDiagram, below), so it can
+// never leak onto an unrelated part picked after backing out.
+let diagramPendingPositionId = null;
+let diagramPendingPositionLabel = "";
 
 function diagramFindFmId(name) {
   const f = catalogs.failureModes.find((x) => x.name === name);
@@ -720,11 +750,17 @@ function diagramResolveZoneCategory(z) {
 }
 
 function diagramResolvePart(p) {
-  diagramState.componentPosition = p.id || null;
+  // p.id covers a part that's numbered on its own picture (Per 2,
+  // Gardan 1, ...); diagramPendingPositionId covers a generic leaf with
+  // no id of its own that was reached via a gated numbered dot instead
+  // (detail-rem's 3 choices, reached from a specific Rem N).
+  diagramState.componentPosition = p.id || diagramPendingPositionId || null;
   diagramState.wheelPosition = null;
   diagramState.categoryFilter = null;
   diagramState.resolvedFm = p.fm;
-  diagramState.resolvedLabel = p.label;
+  diagramState.resolvedLabel = diagramPendingPositionLabel ? `${diagramPendingPositionLabel} - ${p.label}` : p.label;
+  diagramPendingPositionId = null;
+  diagramPendingPositionLabel = "";
   diagramApplyResult();
 }
 
@@ -744,7 +780,13 @@ function diagramResolveWheel(w) {
 function renderDiagram() {
   const screenId = diagramState.stack[diagramState.stack.length - 1];
   const screen = DIAGRAM_SCREENS[screenId];
-  document.getElementById("diagram-title").textContent = screen.title;
+  // A pending numbered position (set right before pushing a gate
+  // screen) is only ever valid for THAT screen -- clear it the instant
+  // we're rendering anything else, so it can never survive a back-out
+  // and attach itself to some unrelated part picked afterward.
+  if (screenId !== "detail-rem") { diagramPendingPositionId = null; diagramPendingPositionLabel = ""; }
+  document.getElementById("diagram-title").textContent =
+    screenId === "detail-rem" && diagramPendingPositionLabel ? `Detail Rem - ${diagramPendingPositionLabel}` : screen.title;
   document.getElementById("diagram-back").style.display = diagramState.stack.length > 1 ? "" : "none";
   const body = document.getElementById("diagram-body");
 
@@ -802,7 +844,16 @@ function renderDiagram() {
     addDot(w.left, w.top, String(w.num), () => diagramResolveWheel(w));
   });
   (screen.parts || []).forEach((p) => {
-    addDot(p.left, p.top, p.label, () => diagramResolvePart(p));
+    addDot(p.left, p.top, p.label, () => {
+      if (p.gate) {
+        diagramPendingPositionId = p.id || null;
+        diagramPendingPositionLabel = p.label;
+        diagramState.stack.push(p.gate);
+        renderDiagram();
+      } else {
+        diagramResolvePart(p);
+      }
+    });
   });
 }
 
