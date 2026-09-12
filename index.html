@@ -278,6 +278,20 @@
       <button type="button" id="diagram-resume-btn" class="diagram-change">Coba lagi dari gambar</button>
     </div>
 
+    <!--
+      Direct instruction, 2026-09-12: Filter oli/Filter solar are routine
+      service items, not failures -- tapping their dot shouldn't drop a
+      mechanic into the failure-mode picker at all. Shows last-serviced
+      history instead, with a shortcut straight into the Servis Rutin
+      form (pre-filled) if they want to log a new one from here.
+    -->
+    <div id="diagram-routine-panel" style="display:none">
+      <div id="diagram-routine-title" class="diagram-title"></div>
+      <div id="diagram-routine-history" class="fm-hint"></div>
+      <button type="button" id="diagram-routine-back-btn" class="diagram-change">&larr; Kembali ke gambar</button>
+      <button type="button" id="diagram-routine-log-btn" class="primary" style="margin-top:10px">+ Catat Servis Rutin</button>
+    </div>
+
     <label>Jenis kerusakan</label>
     <select id="f-failure-mode"></select>
     <div class="fm-hint" id="f-fm-hint"></div>
@@ -291,18 +305,16 @@
       <label>Truk</label>
       <select id="r-truck"></select>
       <label>Item</label>
-      <select id="r-item-type">
-        <option value="filter_solar">Filter solar</option>
-        <option value="oli_mesin">Oli mesin</option>
-        <option value="minyak_rem">Minyak rem</option>
-        <option value="terpal">Terpal</option>
-      </select>
+      <select id="r-item-type"></select>
       <label>Tanggal</label>
       <input type="date" id="r-performed-at" />
       <!-- Quantity only makes sense for the two fluids -- toggled by
-           r-item-type's own change handler, see wireRutinForm below. -->
+           r-item-type's own change handler, see updateQuantityRowVisibility
+           below. Label text (liter vs ml) also comes from ROUTINE_ITEMS,
+           not hardcoded -- oli mesin and minyak rem are measured in very
+           different quantities. -->
       <div id="r-quantity-row">
-        <label>Jumlah (liter, opsional)</label>
+        <label id="r-quantity-label">Jumlah (opsional)</label>
         <input type="number" id="r-quantity" step="0.1" min="0" placeholder="mis. 8" />
       </div>
       <label>Catatan (opsional)</label>
@@ -653,8 +665,20 @@ const DIAGRAM_SCREENS = {
     title: "Mesin Tampak Luar", src: dimg("truck-engine-exterior.jpg"), alt: "Detail mesin tampak luar",
     parts: [
       { fm: "Alternator/dinamo rusak", label: "Alternator", left: "49%", top: "34%" },
-      { fm: "Ganti filter solar", label: "Filter solar", left: "62.9%", top: "49.6%" },
-      { fm: "Ganti filter oli", label: "Filter oli", left: "58.9%", top: "79.3%" },
+      // Direct instruction, 2026-09-12: these two are routine service
+      // items, not failures -- see the diagram-routine-panel HTML
+      // comment and diagramShowRoutineInfo() below. `routine` here is
+      // routine_maintenance_logs.item_type, not a failure_mode name.
+      { routine: "filter_solar", label: "Filter solar", left: "62.9%", top: "49.6%" },
+      // Direct check while building this, 2026-09-12: "filter_oli" was
+      // NOT yet a valid routine_maintenance_logs.item_type (only
+      // filter_solar/oli_mesin/minyak_rem/terpal existed) -- the oil
+      // FILTER and the engine OIL are two different physical items with
+      // different change intervals, so silently reusing "oli_mesin"
+      // here would have conflated them. Added as a real 4th... well,
+      // 5th item_type in the same migration as this dot (see companion
+      // PR), not invented client-side alone.
+      { routine: "filter_oli", label: "Filter oli", left: "58.9%", top: "79.3%" },
       { fm: "Dinamo starter rusak", label: "Starter", left: "75.5%", top: "64%" },
     ],
   },
@@ -900,7 +924,9 @@ function renderDiagram() {
   });
   (screen.parts || []).forEach((p) => {
     addDot(p.left, p.top, p.label, () => {
-      if (p.gate) {
+      if (p.routine) {
+        diagramShowRoutineInfo(p);
+      } else if (p.gate) {
         diagramPendingPositionId = p.id || null;
         diagramPendingPositionLabel = p.label;
         diagramState.stack.push(p.gate);
@@ -919,6 +945,7 @@ document.getElementById("diagram-change-btn").addEventListener("click", () => {
   diagramState = freshDiagramState();
   diagramResetFmOptions();
   document.getElementById("diagram-summary").style.display = "none";
+  document.getElementById("diagram-routine-panel").style.display = "none";
   document.getElementById("diagram-picker").style.display = "block";
   renderDiagram();
 });
@@ -927,11 +954,13 @@ document.getElementById("diagram-skip-btn").addEventListener("click", () => {
   diagramResetFmOptions();
   document.getElementById("diagram-picker").style.display = "none";
   document.getElementById("diagram-summary").style.display = "none";
+  document.getElementById("diagram-routine-panel").style.display = "none";
   document.getElementById("diagram-skip-note").style.display = "block";
 });
 document.getElementById("diagram-resume-btn").addEventListener("click", () => {
   diagramState = freshDiagramState();
   document.getElementById("diagram-skip-note").style.display = "none";
+  document.getElementById("diagram-routine-panel").style.display = "none";
   document.getElementById("diagram-picker").style.display = "block";
   renderDiagram();
 });
@@ -994,6 +1023,7 @@ document.getElementById("btn-create").addEventListener("click", async () => {
     diagramResetFmOptions();
     document.getElementById("diagram-summary").style.display = "none";
     document.getElementById("diagram-skip-note").style.display = "none";
+    document.getElementById("diagram-routine-panel").style.display = "none";
     document.getElementById("diagram-picker").style.display = "block";
     renderDiagram();
   } catch (e) {
@@ -1002,6 +1032,23 @@ document.getElementById("btn-create").addEventListener("click", async () => {
     btn.disabled = false;
   }
 });
+
+// Same catalog as skl-route-agent/dashboard.html's own
+// ROUTINE_MAINTENANCE_ITEMS (hand-kept in sync, same convention as
+// LOCATION_LABELS/ISSUE_STATUS_LABELS already are) -- quantity only
+// makes sense for the two fluids, and oli mesin/minyak rem are measured
+// in very different quantities (liter vs ml), so unit comes from here
+// rather than being hardcoded per-field.
+const ROUTINE_ITEMS = [
+  { type: "filter_solar", label: "Filter solar" },
+  { type: "filter_oli", label: "Filter oli" },
+  { type: "oli_mesin", label: "Oli mesin", hasQuantity: true, unit: "liter" },
+  { type: "minyak_rem", label: "Minyak rem", hasQuantity: true, unit: "ml" },
+  { type: "terpal", label: "Terpal" },
+];
+document.getElementById("r-item-type").innerHTML = ROUTINE_ITEMS
+  .map((it) => `<option value="${it.type}">${it.label}</option>`)
+  .join("");
 
 // Report-kind fork -- see the HTML comment above #report-kind-fork.
 // Both forms stay in the DOM the whole time (simpler than tearing down/
@@ -1016,17 +1063,62 @@ function showReportKindFork() {
 function showMasalahForm() {
   document.getElementById("report-kind-fork").style.display = "none";
   document.getElementById("new-masalah-form").style.display = "block";
+  document.getElementById("new-rutin-form").style.display = "none";
 }
+// Also callable directly from the diagram's routine-item shortcut (see
+// diagramShowRoutineInfo below), not just the fork -- explicitly hides
+// new-masalah-form too so both forms are never visible at once
+// regardless of which state this was called from.
 function showRutinForm() {
   document.getElementById("report-kind-fork").style.display = "none";
+  document.getElementById("new-masalah-form").style.display = "none";
   document.getElementById("new-rutin-form").style.display = "block";
   const dateEl = document.getElementById("r-performed-at");
   if (!dateEl.value) dateEl.value = new Date().toISOString().slice(0, 10);
   updateQuantityRowVisibility();
 }
+
+// Routine-item diagram dots (Filter oli/Filter solar) -- shows history
+// instead of dropping into the failure-mode picker, since these answer
+// "what work was done" not "what's wrong". See diagram-routine-panel.
+async function diagramShowRoutineInfo(p) {
+  document.getElementById("diagram-picker").style.display = "none";
+  const panel = document.getElementById("diagram-routine-panel");
+  panel.style.display = "block";
+  panel.dataset.itemType = p.routine;
+  document.getElementById("diagram-routine-title").textContent = p.label;
+  const historyEl = document.getElementById("diagram-routine-history");
+  historyEl.textContent = "Memuat riwayat...";
+  const truckId = document.getElementById("f-truck").value;
+  if (!truckId) { historyEl.textContent = "Pilih truk dulu untuk melihat riwayat."; return; }
+  try {
+    const { latestByItem } = await call("list_routine_maintenance", { truck_id: truckId });
+    const log = latestByItem && latestByItem[p.routine];
+    historyEl.textContent = log
+      ? `Terakhir: ${log.performed_at} oleh ${log.performed_by}` + (log.quantity ? ` (${log.quantity} ${log.unit || ""})` : "")
+      : "Belum pernah dicatat untuk truk ini.";
+  } catch (e) {
+    historyEl.textContent = "Gagal memuat riwayat: " + e.message;
+  }
+}
+document.getElementById("diagram-routine-back-btn").addEventListener("click", () => {
+  document.getElementById("diagram-routine-panel").style.display = "none";
+  document.getElementById("diagram-picker").style.display = "block";
+});
+document.getElementById("diagram-routine-log-btn").addEventListener("click", () => {
+  const itemType = document.getElementById("diagram-routine-panel").dataset.itemType;
+  const truckId = document.getElementById("f-truck").value;
+  showRutinForm();
+  if (truckId) document.getElementById("r-truck").value = truckId;
+  document.getElementById("r-item-type").value = itemType;
+  updateQuantityRowVisibility();
+});
 function updateQuantityRowVisibility() {
-  const itemType = document.getElementById("r-item-type").value;
-  document.getElementById("r-quantity-row").classList.toggle("visible", itemType === "oli_mesin" || itemType === "minyak_rem");
+  const item = ROUTINE_ITEMS.find((it) => it.type === document.getElementById("r-item-type").value);
+  document.getElementById("r-quantity-row").classList.toggle("visible", !!(item && item.hasQuantity));
+  if (item && item.hasQuantity) {
+    document.getElementById("r-quantity-label").textContent = `Jumlah (${item.unit}, opsional)`;
+  }
 }
 document.getElementById("btn-kind-masalah").addEventListener("click", showMasalahForm);
 document.getElementById("btn-kind-rutin").addEventListener("click", showRutinForm);
@@ -1039,13 +1131,13 @@ document.getElementById("btn-create-rutin").addEventListener("click", async () =
   btn.disabled = true;
   try {
     const itemType = document.getElementById("r-item-type").value;
-    const showsQuantity = itemType === "oli_mesin" || itemType === "minyak_rem";
+    const item = ROUTINE_ITEMS.find((it) => it.type === itemType);
     await call("add_routine_maintenance", {
       truck_id: document.getElementById("r-truck").value,
       item_type: itemType,
       performed_at: document.getElementById("r-performed-at").value,
-      quantity: showsQuantity ? (document.getElementById("r-quantity").value || null) : null,
-      unit: showsQuantity ? "liter" : null,
+      quantity: item && item.hasQuantity ? (document.getElementById("r-quantity").value || null) : null,
+      unit: item && item.hasQuantity ? item.unit : null,
       notes: document.getElementById("r-notes").value,
     });
     toast("Servis rutin dicatat.");
