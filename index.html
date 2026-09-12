@@ -152,6 +152,47 @@
   .photo-btn { padding: 9px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface2); color: var(--text); font-size: 13px; font-weight: 600; cursor: pointer; text-align: center; }
   .photo-btn input { display: none; }
   .photo-count { font-size: 12px; color: var(--muted); }
+
+  /* Truck diagram picker (Lapor Baru) -- see DIAGRAM_SCREENS in the
+     script below. */
+  #diagram-picker {
+    border: 1px solid var(--border); border-radius: 10px; background: var(--surface);
+    padding: 10px; margin-bottom: 4px;
+  }
+  .diagram-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .diagram-title { font-size: 13px; font-weight: 600; color: var(--text); }
+  .diagram-back {
+    border: none; background: none; color: var(--accent); font-size: 13px; font-weight: 600;
+    cursor: pointer; padding: 2px 0;
+  }
+  .diagram-imgwrap { position: relative; width: 100%; border-radius: 8px; overflow: hidden; background: var(--surface2); }
+  .diagram-imgwrap img { display: block; width: 100%; height: auto; }
+  .diagram-dots { position: absolute; inset: 0; }
+  /* Text-on-dot, not a bare circle -- there's no hover on a phone to
+     reveal a caption the way the desktop dashboard's dots do, so the
+     label has to be readable directly. */
+  .diagram-dot {
+    position: absolute; transform: translate(-50%, -50%);
+    min-width: 22px; padding: 3px 7px; border: 2px solid #fff; border-radius: 999px;
+    background: var(--accent); color: #fff; font-size: 11px; font-weight: 700;
+    line-height: 1.2; text-align: center; cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,0.35);
+    white-space: nowrap;
+  }
+  .diagram-altgo, .diagram-skip, .diagram-change, #diagram-resume-btn {
+    border: none; background: none; color: var(--accent); font-size: 12.5px; font-weight: 600;
+    cursor: pointer; padding: 8px 0 2px; text-align: left; display: block;
+  }
+  .diagram-menu { display: flex; flex-direction: column; gap: 8px; }
+  .diagram-menu-btn {
+    padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface2);
+    color: var(--text); font-size: 14px; text-align: left; cursor: pointer;
+  }
+  #diagram-summary {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    border: 1px solid var(--border); border-radius: 10px; background: var(--accent-dim);
+    padding: 10px 12px; margin-bottom: 4px; font-size: 13.5px; font-weight: 600; color: var(--accent);
+  }
+  #diagram-summary .diagram-change { padding: 0; }
 </style>
 </head>
 <body>
@@ -179,6 +220,35 @@
       <option value="storing_luar">Storing luar</option>
       <option value="bengkel_luar">Bengkel luar</option>
     </select>
+
+    <label>Di bagian mana?</label>
+    <!--
+      Direct instruction, 2026-09-12: let a mechanic tap the truck itself
+      to say WHERE the problem is, instead of typing/picking a position
+      that a director then has to fix after the fact -- all the hotspot
+      grid-verification work in skl-route-agent/dashboard.html was only
+      paying off for someone reviewing history at a desk, never at the
+      moment a report is actually created. See DIAGRAM_SCREENS in the
+      script below for the data (ported from that dashboard, same
+      source of truth).
+    -->
+    <div id="diagram-picker">
+      <div class="diagram-header">
+        <button type="button" id="diagram-back" class="diagram-back" style="display:none">&larr; Kembali</button>
+        <span id="diagram-title" class="diagram-title"></span>
+      </div>
+      <div id="diagram-body"></div>
+      <button type="button" id="diagram-skip-btn" class="diagram-skip">Tidak ada di gambar / Lainnya</button>
+    </div>
+    <div id="diagram-summary" style="display:none">
+      <span id="diagram-result-text"></span>
+      <button type="button" id="diagram-change-btn" class="diagram-change">Ubah</button>
+    </div>
+    <div id="diagram-skip-note" class="fm-hint" style="display:none">
+      Posisi dilewati -- pilih Jenis kerusakan langsung dari daftar di bawah.
+      <button type="button" id="diagram-resume-btn" class="diagram-change">Coba lagi dari gambar</button>
+    </div>
+
     <label>Jenis kerusakan</label>
     <select id="f-failure-mode"></select>
     <div class="fm-hint" id="f-fm-hint"></div>
@@ -410,6 +480,356 @@ async function loadCatalogs() {
     .join("");
 }
 
+// ---- Truck diagram picker (Lapor Baru) --------------------------------
+// Direct instruction, 2026-09-12: let a mechanic tap the truck itself to
+// say WHERE the problem is, instead of typing/picking a position that a
+// director then has to fix after the fact -- all the grid-verification
+// work in skl-route-agent/dashboard.html was only paying off for someone
+// reviewing history at a desk, never at the moment a report is actually
+// created. Images load straight from that live dashboard's own static
+// folder rather than being duplicated into this repo, so a future
+// re-compress/replace only has to happen in one place.
+//
+// Data below is PORTED from dashboard.html's TRUCK_DIAGRAM_ZONES/WHEELS
+// and each zone's own detail-picture hotspot arrays -- same source of
+// truth, kept in sync by hand across the two codebases (same convention
+// as LOCATION_LABELS/ISSUE_STATUS_LABELS already are). Scope: covers
+// every zone that has a real close-up photo today; bahan_bakar and bak
+// have no dedicated picture yet (per that repo's own "let go of it for
+// now" note), so tapping those just narrows the Jenis kerusakan list to
+// their category, same as clicking a zone with no drill-down does on
+// the dashboard.
+const DIAGRAM_IMG_BASE = "https://skl-ops.ptmercusuar.com/static/truck-diagram/";
+const DIAGRAM_IMG_V = "8"; // mirrors dashboard.html's TRUCK_DIAGRAM_ASSET_VERSION at time of writing -- bump if that repo replaces a file in place again.
+function dimg(file) { return DIAGRAM_IMG_BASE + file + "?v=" + DIAGRAM_IMG_V; }
+
+// Leaf hotspot: {fm: <exact failure_mode name>, id?, label, left, top}.
+// Matches by exact NAME, not category -- same reason dashboard.html's
+// own nested-reveal dots do: a numbered part can be catalogued under a
+// DIFFERENT category than the picture it visually lives on (e.g.
+// Bearing/laher is 'chassis' but shown on the Rem picture -- not
+// reproduced here, out of scope for this pass, see PR description).
+// `id`, when present, is the SAME coded slot dashboard.html's own
+// hotspot uses (rem-3, per-2, powertrain-gardan-1, ...) -- reused
+// verbatim as this report's component_position so it lines up with the
+// exact dot that would highlight it later.
+//
+// Zone hotspot: {key: <failure_mode category>, label, left, top, go?}.
+// `go` is which screen tapping it opens; with no `go`, it just narrows
+// the Jenis kerusakan list to that category (no picture exists yet).
+const DIAGRAM_SCREENS = {
+  root: {
+    title: "Tampak Samping", src: dimg("truck-side.jpg"), alt: "Tampak samping",
+    zones: [
+      { key: "mesin", label: "Mesin", left: "15%", top: "62%", go: "mesin-menu" },
+      { key: "kelistrikan", label: "Kelistrikan", left: "6.2%", top: "58.3%", go: "kelistrikan" },
+      { key: "chassis", label: "Chassis", left: "55%", top: "67%", go: "chassis-menu" },
+      { key: "bahan_bakar", label: "Tangki BBM", left: "39%", top: "76%" },
+      { key: "kabin", label: "Kabin", left: "16.6%", top: "29.1%", go: "kabin" },
+      { key: "transmisi", label: "Powertrain", left: "45%", top: "68%", go: "powertrain" },
+      { key: "bak", label: "Body", left: "65%", top: "48%" },
+      { key: "ban", label: "Roda", left: "80%", top: "80%", go: "wheels" },
+    ],
+  },
+  wheels: {
+    title: "Tampak Bawah - Roda", src: dimg("truck-underside.jpg"), alt: "Tampak bawah - roda",
+    wheels: [
+      { code: "FL", num: 1, left: "8%", top: "8%" },
+      { code: "FR", num: 2, left: "8%", top: "92%" },
+      { code: "RL1_OUT", num: 3, left: "70%", top: "8%" },
+      { code: "RL1_IN", num: 4, left: "76%", top: "22%" },
+      { code: "RR1_OUT", num: 5, left: "70%", top: "92%" },
+      { code: "RR1_IN", num: 6, left: "76%", top: "78%" },
+      { code: "RL2_OUT", num: 7, left: "90%", top: "8%" },
+      { code: "RL2_IN", num: 8, left: "96%", top: "22%" },
+      { code: "RR2_OUT", num: 9, left: "90%", top: "92%" },
+      { code: "RR2_IN", num: 10, left: "96%", top: "78%" },
+    ],
+    altGo: { label: "Bukan masalah ban? Velg/baud roda →", go: "wheel-rim" },
+  },
+  "wheel-rim": {
+    title: "Detail Velg & Baud Roda", src: dimg("truck-wheel-rim.jpg"), alt: "Detail velg dan baud roda",
+    parts: [
+      { fm: "Velg rusak/penyok", label: "Velg", left: "32%", top: "45%" },
+      { fm: "Baud roda kendor/patah", label: "Baud roda", left: "61%", top: "32%" },
+    ],
+  },
+  powertrain: {
+    title: "Tampak Bawah - Powertrain", src: dimg("truck-underside.jpg"), alt: "Tampak bawah - powertrain",
+    parts: [
+      { fm: "Gearbox/transmisi bermasalah", label: "Transmisi", left: "14%", top: "49%" },
+      { fm: "Kopel/as kopel rusak", id: "powertrain-kopel-1", label: "Kopel 1", left: "45%", top: "50%" },
+      { fm: "As roda/gardan rusak", id: "powertrain-gardan-1", label: "Gardan 1", left: "72%", top: "48%" },
+      { fm: "Kopel/as kopel rusak", id: "powertrain-kopel-2", label: "Kopel 2", left: "79%", top: "49%" },
+      { fm: "As roda/gardan rusak", id: "powertrain-gardan-2", label: "Gardan 2", left: "87%", top: "48%" },
+    ],
+  },
+  "mesin-menu": {
+    title: "Mesin - pilih bagian",
+    menu: [
+      { label: "Mesin (dalam)", go: "mesin" },
+      { label: "Radiator", go: "radiator" },
+      { label: "Bak oli & pompa hidrolik", go: "mesin-oilpan" },
+      { label: "Alternator / starter / filter (luar)", go: "mesin-exterior" },
+    ],
+  },
+  mesin: {
+    title: "Detail Mesin", src: dimg("truck-engine.jpg"), alt: "Detail mesin",
+    parts: [
+      { fm: "Kruk as rusak", label: "Kruk as", left: "50%", top: "88%" },
+      { fm: "Turbo rusak", label: "Turbo", left: "62%", top: "45%" },
+      { fm: "Pompa injeksi/injektor bermasalah", label: "Injektor", left: "78%", top: "15%" },
+      { fm: "Kebocoran oli", label: "Kebocoran oli", left: "35%", top: "85%" },
+      { fm: "Pompa air (water pump) bocor", label: "Pompa air", left: "12%", top: "40%" },
+    ],
+  },
+  radiator: {
+    title: "Detail Radiator", src: dimg("truck-radiator.jpg"), alt: "Detail radiator",
+    parts: [{ fm: "Radiator bocor", label: "Radiator", left: "55%", top: "15%" }],
+  },
+  "mesin-oilpan": {
+    title: "Bak Oli & Pompa Hidrolik", src: dimg("truck-engine-oilpan-hydraulic.jpg"), alt: "Detail bak oli dan pompa hidrolik",
+    parts: [
+      { fm: "Kebocoran oli", label: "Bak oli", left: "42%", top: "48%" },
+      { fm: "Pompa hidrolik bocor/rusak", label: "Pompa hidrolik", left: "61%", top: "48%" },
+    ],
+  },
+  "mesin-exterior": {
+    title: "Mesin Tampak Luar", src: dimg("truck-engine-exterior.jpg"), alt: "Detail mesin tampak luar",
+    parts: [
+      { fm: "Alternator/dinamo rusak", label: "Alternator", left: "49%", top: "34%" },
+      { fm: "Ganti filter solar", label: "Filter solar", left: "62.9%", top: "49.6%" },
+      { fm: "Ganti filter oli", label: "Filter oli", left: "58.9%", top: "79.3%" },
+      { fm: "Dinamo starter rusak", label: "Starter", left: "75.5%", top: "64%" },
+    ],
+  },
+  kelistrikan: {
+    title: "Detail Kelistrikan", src: dimg("truck-electrical.jpg"), alt: "Detail kelistrikan",
+    parts: [
+      { fm: "Aki soak", id: "aki-1", label: "Aki 1", left: "26%", top: "23%" },
+      { fm: "Aki soak", id: "aki-2", label: "Aki 2", left: "60%", top: "19%" },
+      { fm: "Kepala aki kendor/korosi", id: "kepala-aki-1", label: "Kepala aki 1", left: "38.59%", top: "30%" },
+      { fm: "Kepala aki kendor/korosi", id: "kepala-aki-2", label: "Kepala aki 2", left: "55.2%", top: "14.1%" },
+      { fm: "Kelistrikan lain", label: "Sekring", left: "71%", top: "48%" },
+    ],
+  },
+  kabin: {
+    title: "Detail Kabin", src: dimg("truck-cabin.jpg"), alt: "Detail kabin",
+    parts: [
+      { fm: "Dashboard/panel rusak", label: "Dashboard", left: "40%", top: "25%" },
+      { fm: "AC tidak dingin", label: "AC", left: "27%", top: "41%" },
+      { fm: "Wiper rusak", label: "Wiper", left: "38.6%", top: "18.9%" },
+      { fm: "Jok/kursi rusak", label: "Jok/kursi", left: "73.6%", top: "45.9%" },
+      { fm: "Kaca pecah/retak", label: "Kaca", left: "10%", top: "13%" },
+    ],
+  },
+  "chassis-menu": {
+    title: "Chassis - pilih bagian",
+    menu: [
+      { label: "Kaki-kaki depan & power steering", go: "chassis-front" },
+      { label: "Per, shockbreaker & rem depan", go: "chassis-leafspring" },
+      { label: "Kaki-kaki belakang", go: "chassis-rear" },
+      { label: "Per & rem - axle tandem 1", go: "chassis-tandem1" },
+      { label: "Per & rem - axle tandem 2", go: "chassis-tandem2" },
+    ],
+  },
+  "chassis-front": {
+    title: "Kaki-kaki Depan", src: dimg("truck-chassis-front.jpg"), alt: "Detail chassis depan",
+    parts: [
+      { fm: "Kaki-kaki/tie rod rusak", id: "kakikaki-1", label: "Kaki-kaki 1", left: "37%", top: "27%" },
+      { fm: "Kaki-kaki/tie rod rusak", id: "kakikaki-2", label: "Kaki-kaki 2", left: "37%", top: "73%" },
+      { fm: "Power steering bermasalah", label: "Power steering", left: "67%", top: "29%" },
+    ],
+  },
+  "chassis-leafspring": {
+    title: "Per, Shock & Rem Depan", src: dimg("truck-chassis-front-leafspring-shock.jpg"), alt: "Detail per, shock, rem depan",
+    parts: [
+      { fm: "Per/suspensi patah", id: "per-1", label: "Per 1", left: "27.3%", top: "46.7%" },
+      { fm: "Shockbreaker rusak", id: "shock-1", label: "Shock 1", left: "32.7%", top: "18%" },
+      { fm: "Per/suspensi patah", id: "per-2", label: "Per 2", left: "62.4%", top: "51.8%" },
+      { fm: "Shockbreaker rusak", id: "shock-2", label: "Shock 2", left: "71.7%", top: "34.7%" },
+      { fm: "Kampas rem habis", id: "rem-1", label: "Rem 1", left: "19%", top: "46.5%" },
+      { fm: "Kampas rem habis", id: "rem-2", label: "Rem 2", left: "86%", top: "57%" },
+    ],
+  },
+  "chassis-rear": {
+    title: "Kaki-kaki Belakang", src: dimg("truck-chassis-rear.jpg"), alt: "Detail chassis belakang",
+    parts: [
+      { fm: "Kaki-kaki/tie rod rusak", id: "kakikaki-3", label: "Kaki-kaki 3", left: "27.3%", top: "38.1%" },
+      { fm: "Kaki-kaki/tie rod rusak", id: "kakikaki-4", label: "Kaki-kaki 4", left: "27.3%", top: "59.7%" },
+      { fm: "Kaki-kaki/tie rod rusak", id: "kakikaki-5", label: "Kaki-kaki 5", left: "61.9%", top: "38.1%" },
+      { fm: "Kaki-kaki/tie rod rusak", id: "kakikaki-6", label: "Kaki-kaki 6", left: "61.9%", top: "59.7%" },
+    ],
+  },
+  "chassis-tandem1": {
+    title: "Per & Rem - Axle Tandem 1", src: dimg("truck-chassis-rear-tandem-side.jpg"), alt: "Detail per dan rem tandem 1",
+    parts: [
+      { fm: "Kampas rem habis", id: "rem-3", label: "Rem 3", left: "42%", top: "58%" },
+      { fm: "Per/suspensi patah", id: "per-3", label: "Per 3", left: "52%", top: "29%" },
+      { fm: "Kampas rem habis", id: "rem-4", label: "Rem 4", left: "77%", top: "55%" },
+    ],
+  },
+  "chassis-tandem2": {
+    title: "Per & Rem - Axle Tandem 2", src: dimg("truck-chassis-rear-axle2.jpg"), alt: "Detail per dan rem tandem 2",
+    parts: [
+      { fm: "Kampas rem habis", id: "rem-5", label: "Rem 5", left: "17%", top: "68%" },
+      { fm: "Per/suspensi patah", id: "per-4", label: "Per 4", left: "45%", top: "48%" },
+      { fm: "Kampas rem habis", id: "rem-6", label: "Rem 6", left: "89%", top: "46%" },
+    ],
+  },
+};
+
+let diagramState = null;
+function freshDiagramState() {
+  return { stack: ["root"], resolvedFm: null, resolvedLabel: null, componentPosition: null, wheelPosition: null, categoryFilter: null };
+}
+diagramState = freshDiagramState();
+
+function diagramFindFmId(name) {
+  const f = catalogs.failureModes.find((x) => x.name === name);
+  return f ? f.id : null;
+}
+
+function diagramResetFmOptions() {
+  const fmSel = document.getElementById("f-failure-mode");
+  fmSel.innerHTML = catalogs.failureModes.map((f) => `<option value="${f.id}">${f.name}</option>`).join("");
+}
+
+function diagramApplyResult() {
+  const fmSel = document.getElementById("f-failure-mode");
+  let list = catalogs.failureModes;
+  if (diagramState.categoryFilter) list = list.filter((f) => f.category === diagramState.categoryFilter);
+  fmSel.innerHTML = list.map((f) => `<option value="${f.id}">${f.name}</option>`).join("");
+  if (diagramState.resolvedFm) {
+    const fid = diagramFindFmId(diagramState.resolvedFm);
+    if (fid) fmSel.value = fid;
+  }
+  document.getElementById("diagram-result-text").textContent = "📍 " + diagramState.resolvedLabel;
+  document.getElementById("diagram-picker").style.display = "none";
+  document.getElementById("diagram-summary").style.display = "flex";
+  document.getElementById("diagram-skip-note").style.display = "none";
+}
+
+function diagramResolveZoneCategory(z) {
+  diagramState.componentPosition = null;
+  diagramState.wheelPosition = null;
+  diagramState.categoryFilter = z.key;
+  diagramState.resolvedFm = null;
+  diagramState.resolvedLabel = z.label + " (semua jenis)";
+  diagramApplyResult();
+}
+
+function diagramResolvePart(p) {
+  diagramState.componentPosition = p.id || null;
+  diagramState.wheelPosition = null;
+  diagramState.categoryFilter = null;
+  diagramState.resolvedFm = p.fm;
+  diagramState.resolvedLabel = p.label;
+  diagramApplyResult();
+}
+
+function diagramResolveWheel(w) {
+  diagramState.componentPosition = null;
+  diagramState.wheelPosition = w.code;
+  diagramState.categoryFilter = "ban";
+  // Ban bocor/pecah is the default guess for tapping a wheel directly --
+  // still a normal, fully-editable dropdown afterward (narrowed to the
+  // 'ban' category, same as every other resolved tap) in case it's
+  // actually Baud roda/Velg instead.
+  diagramState.resolvedFm = "Ban bocor/pecah";
+  diagramState.resolvedLabel = "Roda " + w.num;
+  diagramApplyResult();
+}
+
+function renderDiagram() {
+  const screenId = diagramState.stack[diagramState.stack.length - 1];
+  const screen = DIAGRAM_SCREENS[screenId];
+  document.getElementById("diagram-title").textContent = screen.title;
+  document.getElementById("diagram-back").style.display = diagramState.stack.length > 1 ? "" : "none";
+  const body = document.getElementById("diagram-body");
+
+  if (screen.menu) {
+    const wrap = document.createElement("div");
+    wrap.className = "diagram-menu";
+    screen.menu.forEach((m) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "diagram-menu-btn";
+      btn.textContent = m.label;
+      btn.addEventListener("click", () => {
+        diagramState.stack.push(m.go);
+        renderDiagram();
+      });
+      wrap.appendChild(btn);
+    });
+    body.innerHTML = "";
+    body.appendChild(wrap);
+    return;
+  }
+
+  body.innerHTML = `<div class="diagram-imgwrap"><img src="${screen.src}" alt="${screen.alt}"><div class="diagram-dots" id="diagram-dots"></div></div>`;
+  if (screen.altGo) {
+    const altBtn = document.createElement("button");
+    altBtn.type = "button";
+    altBtn.className = "diagram-altgo";
+    altBtn.textContent = screen.altGo.label;
+    altBtn.addEventListener("click", () => {
+      diagramState.stack.push(screen.altGo.go);
+      renderDiagram();
+    });
+    body.appendChild(altBtn);
+  }
+
+  const dotsEl = document.getElementById("diagram-dots");
+  const addDot = (left, top, text, onClick) => {
+    const d = document.createElement("button");
+    d.type = "button";
+    d.className = "diagram-dot";
+    d.style.left = left;
+    d.style.top = top;
+    d.textContent = text;
+    d.addEventListener("click", onClick);
+    dotsEl.appendChild(d);
+  };
+
+  (screen.zones || []).forEach((z) => {
+    addDot(z.left, z.top, z.label, () => {
+      if (z.go) { diagramState.stack.push(z.go); renderDiagram(); }
+      else { diagramResolveZoneCategory(z); }
+    });
+  });
+  (screen.wheels || []).forEach((w) => {
+    addDot(w.left, w.top, String(w.num), () => diagramResolveWheel(w));
+  });
+  (screen.parts || []).forEach((p) => {
+    addDot(p.left, p.top, p.label, () => diagramResolvePart(p));
+  });
+}
+
+document.getElementById("diagram-back").addEventListener("click", () => {
+  if (diagramState.stack.length > 1) { diagramState.stack.pop(); renderDiagram(); }
+});
+document.getElementById("diagram-change-btn").addEventListener("click", () => {
+  diagramState = freshDiagramState();
+  diagramResetFmOptions();
+  document.getElementById("diagram-summary").style.display = "none";
+  document.getElementById("diagram-picker").style.display = "block";
+  renderDiagram();
+});
+document.getElementById("diagram-skip-btn").addEventListener("click", () => {
+  diagramState = freshDiagramState();
+  diagramResetFmOptions();
+  document.getElementById("diagram-picker").style.display = "none";
+  document.getElementById("diagram-summary").style.display = "none";
+  document.getElementById("diagram-skip-note").style.display = "block";
+});
+document.getElementById("diagram-resume-btn").addEventListener("click", () => {
+  diagramState = freshDiagramState();
+  document.getElementById("diagram-skip-note").style.display = "none";
+  document.getElementById("diagram-picker").style.display = "block";
+  renderDiagram();
+});
+
 // Direct feedback, 2026-09-09: "report can start with rem blong, but
 // somehow we need to categorize failure modes." Typing a description
 // (debounced -- one call per pause in typing, not per keystroke) asks
@@ -455,10 +875,21 @@ document.getElementById("btn-create").addEventListener("click", async () => {
       location: document.getElementById("f-location").value,
       failure_mode_id: document.getElementById("f-failure-mode").value,
       description: document.getElementById("f-description").value,
+      wheel_position: diagramState.wheelPosition || null,
+      component_position: diagramState.componentPosition || null,
     });
     document.getElementById("f-description").value = "";
     toast("Laporan servis disimpan.");
     if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
+    // Reset the diagram picker for the next report -- otherwise a
+    // resolved position/filter from the last report would silently
+    // carry over onto one that has nothing to do with it.
+    diagramState = freshDiagramState();
+    diagramResetFmOptions();
+    document.getElementById("diagram-summary").style.display = "none";
+    document.getElementById("diagram-skip-note").style.display = "none";
+    document.getElementById("diagram-picker").style.display = "block";
+    renderDiagram();
   } catch (e) {
     toast("Gagal: " + e.message);
   } finally {
@@ -835,6 +1266,7 @@ document.querySelectorAll(".tab").forEach((tab) => {
   } catch (e) {
     toast("Gagal memuat data: " + e.message);
   }
+  renderDiagram();
 })();
 </script>
 </body>
