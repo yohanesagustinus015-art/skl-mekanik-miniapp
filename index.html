@@ -204,6 +204,35 @@
   .report-kind-btn:active { background: var(--accent-dim); border-color: var(--accent); }
   #r-quantity-row { display: none; }
   #r-quantity-row.visible { display: block; }
+
+  /* Direct instruction, 2026-09-14: the pool tablet is a shared kiosk
+     device (bigger screen, mounted, used standing up), not another
+     phone -- at that width the diagram deserves real space instead of
+     being squeezed into the same ~340px column a phone gets. Grid
+     auto-placement (row-flow) packs each explicitly-columned item into
+     the next open row of ITS column in document order, so the two
+     "lists" (diagram-side, field-side) each stack correctly without
+     needing an explicit row count. Below 900px this rule doesn't apply
+     at all -- .lapor-grid is inert, phones get the exact block-stacked
+     layout they always have. 900px chosen to clear an 800px-wide
+     portrait tablet with margin, and comfortably fit typical 10-11"
+     landscape tablets like the pool's.
+  */
+  @media (min-width: 900px) {
+    .lapor-grid { display: grid; grid-template-columns: 1fr 340px; column-gap: 28px; align-items: start; }
+    .lbl-bagian, #diagram-picker, #diagram-summary, #diagram-skip-note, #diagram-routine-panel { grid-column: 1; }
+    .lbl-truck, #f-truck, .lbl-lokasi, #f-location,
+    .lbl-jenis, #f-failure-mode, #f-fm-hint,
+    .lbl-deskripsi, #f-description, #btn-create { grid-column: 2; }
+    /* No height cap on the diagram image on purpose: .diagram-imgwrap
+       img is width:100%/height:auto and .diagram-dots' hotspot
+       positions are percentages of that same wrapper -- capping height
+       here would shrink the image narrower than its 100%-wide wrapper
+       (per replaced-element sizing) while the wrapper itself stayed
+       full width, throwing every hotspot off the actual pixels of a
+       now-smaller, left-aligned image. Column 1 simply being wider than
+       the phone's ~340px is already the win; let width:100% do its job. */
+  }
 </style>
 </head>
 <body>
@@ -241,16 +270,29 @@
 
     <div id="new-masalah-form" style="display:none">
     <button type="button" class="diagram-change" id="btn-kind-back-1" style="margin:0 0 8px">&larr; Ganti jenis laporan</button>
-    <label>Truk</label>
+    <!--
+      Direct instruction, 2026-09-14: a shared tablet mounted at the pool
+      needs this screen to actually use its width -- the layout below is
+      still mobile-first (a plain block stack, unchanged at narrow
+      widths), but wrapping it in .lapor-grid lets the >=900px rule
+      further down reflow it into two columns (diagram gets real estate,
+      fields sit alongside) without moving a single element out of its
+      original document order or touching any id/JS. #new-masalah-form
+      itself can't carry the grid directly -- its show/hide is an inline
+      style.display toggle in JS, which would always beat a stylesheet
+      rule regardless of media query.
+    -->
+    <div class="lapor-grid">
+    <label class="lbl-truck">Truk</label>
     <select id="f-truck"></select>
-    <label>Lokasi</label>
+    <label class="lbl-lokasi">Lokasi</label>
     <select id="f-location">
       <option value="pool">Pool</option>
       <option value="storing_luar">Storing luar</option>
       <option value="bengkel_luar">Bengkel luar</option>
     </select>
 
-    <label>Di bagian mana?</label>
+    <label class="lbl-bagian">Di bagian mana?</label>
     <!--
       Direct instruction, 2026-09-12: let a mechanic tap the truck itself
       to say WHERE the problem is, instead of typing/picking a position
@@ -292,12 +334,13 @@
       <button type="button" id="diagram-routine-log-btn" class="primary" style="margin-top:10px">+ Catat Servis Rutin</button>
     </div>
 
-    <label>Jenis kerusakan</label>
+    <label class="lbl-jenis">Jenis kerusakan</label>
     <select id="f-failure-mode"></select>
     <div class="fm-hint" id="f-fm-hint"></div>
-    <label>Deskripsi</label>
+    <label class="lbl-deskripsi">Deskripsi</label>
     <textarea id="f-description" placeholder="Jelaskan kerusakan yang ditemukan... (mis. &quot;rem blong&quot;)"></textarea>
     <button class="primary" id="btn-create">Simpan Laporan</button>
+    </div>
     </div>
 
     <div id="new-rutin-form" style="display:none">
