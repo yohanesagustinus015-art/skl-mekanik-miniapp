@@ -378,7 +378,13 @@
 <div class="toast" id="toast"></div>
 
 <script>
-const API_URL = "https://kcftvbuwotjjroattdak.supabase.co/functions/v1/mekanik-api";
+// Overridable via ?api=<url> (e.g. pointing at a local/staging mekanik-api
+// during testing) -- this page has no build step (see driver-bot SKILL.md's
+// own note on that), so a query-param override is the only way to point it
+// somewhere other than production without editing and republishing the file.
+// Falls back to production, so normal Telegram launches are unaffected.
+const API_URL = new URLSearchParams(location.search).get("api")
+  || "https://kcftvbuwotjjroattdak.supabase.co/functions/v1/mekanik-api";
 const tg = window.Telegram && window.Telegram.WebApp;
 
 let catalogs = { failureModes: [], vendors: [], trucks: [] };
@@ -580,7 +586,14 @@ async function call(action, payload) {
     body: JSON.stringify({ initData: tg.initData, action, payload: payload || {} }),
   });
   const body = await resp.json().catch(() => ({}));
-  if (!resp.ok) throw new Error(body.error || ("HTTP " + resp.status));
+  if (!resp.ok) {
+    // Logged once here (every call site already surfaces body.error to the
+    // mechanic via a toast) so a real failure leaves a trail in the
+    // webview's own console -- previously the only record of a failure was
+    // whatever the mechanic could read off the toast and relay verbatim.
+    console.error("mekanik-api call failed:", action, resp.status, body);
+    throw new Error(body.error || ("HTTP " + resp.status));
+  }
   return body;
 }
 
