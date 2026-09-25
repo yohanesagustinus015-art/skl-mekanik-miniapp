@@ -151,6 +151,14 @@ textarea.field { min-height: 88px; resize: vertical; }
 .crack { position: absolute; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%; background: var(--accent); border: 2px solid #fff; box-shadow: 0 1px 4px rgba(43,36,32,.4); pointer-events: none; }
 .pop.low { top: 76%; } .pop.high { top: 24%; }
 .crack.new { width: 24px; height: 24px; margin: -12px 0 0 -12px; background: rgba(139,26,26,.35); border: 3px solid var(--accent); }
+/* Pin: the dot sits exactly where the dashboard puts the part, the label
+   floats above it on a short stem (lifted further when labels collide). */
+.spot.pin { transform: translate(calc(-50% + var(--dx, 0px)), calc(-100% - 12px - var(--lift, 0px))); }
+.spot.pin::before { content: ""; position: absolute; left: calc(50% - var(--dx, 0px)); top: 100%; width: 2px; margin-left: -1px; height: calc(8px + var(--lift, 0px)); background: rgba(43,36,32,.55); }
+.spot.pin::after { content: ""; box-sizing: border-box; position: absolute; left: calc(50% - var(--dx, 0px)); top: calc(100% + 6px + var(--lift, 0px)); width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; background: var(--accent); border: 2px solid #fff; box-shadow: 0 1px 3px rgba(43,36,32,.45); }
+.spot.pin.below { transform: translate(calc(-50% + var(--dx, 0px)), 12px); }
+.spot.pin.below::before { top: auto; bottom: 100%; height: 8px; }
+.spot.pin.below::after { top: auto; bottom: calc(100% + 6px); }
 .spot .n { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px; border-radius: 11px; background: #fff; color: var(--accent); font-size: 12px; font-weight: 700; }
 .thumbs { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(112px, 1fr); gap: 8px; overflow-x: auto; padding-bottom: 2px; }
 .thumb { display: flex; flex-direction: column; gap: 5px; padding: 5px; border-radius: 12px; background: var(--surface); text-align: left; }
@@ -224,13 +232,13 @@ const IMG_ORIGIN = "https://skl-ops.ptmercusuar.com";
 const img = (f) => IMG_ORIGIN + (f.startsWith("/") ? f : "/static/truck-diagram/" + f) + "?v=" + ((window.SKL_TRUCK_DIAGRAM || {}).assetVersion || "0");
 const tg = window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData ? window.Telegram.WebApp : null;
 const DEMO = location.hash === "#demo";
-const LOCK_AFTER_MS = 2 * 60 * 1000;
+const LOCK_AFTER_MS = 5 * 60 * 1000;
 const UNDO_MS = 10 * 1000;
 const DEVICE_KEY_STORE = "skl_mekanik_device_key";
 
 // ---------- labels (kept in step with mekanik-api / dashboard / dispatcher) ----------
 const LOCATION_LABELS = { pool: "Pool", storing_luar: "Storing", bengkel_luar: "Bengkel luar" };
-const STATE_LABELS = { IN_TRANSIT: "Transit", UNLOADING: "Bongkar", LOADING: "Muat", QUEUING_PICKUP: "Muat", DECIDING: "Pilih rute", FERRY: "Ferry", WAITING_YARD: "Di Pool", IDLE_UNKNOWN: "Idle", UNDER_REPAIR: "Perbaikan", POSITIONING: "Positioning" };
+const STATE_LABELS = { IN_TRANSIT: "Transit", UNLOADING: "Bongkar", LOADING: "Muat", QUEUING_PICKUP: "Muat", DECIDING: "Pilih rute", FERRY: "Ferry", WAITING_YARD: "Di Pool", IDLE_UNKNOWN: "Berhenti", UNDER_REPAIR: "Perbaikan", POSITIONING: "Menuju muat" };
 const STATE_COLOR = { IN_TRANSIT: "#22C55E", LOADING: "#3B82F6", UNLOADING: "#3B82F6", QUEUING_PICKUP: "#3B82F6", DECIDING: "#D97706", FERRY: "#a78bfa", WAITING_YARD: "#0D9488", IDLE_UNKNOWN: "#4A5568", UNDER_REPAIR: "#EF4444", POSITIONING: "#22C55E" };
 const ROUTINE_FM_NAMES = ["Ganti filter oli", "Ganti filter solar", "Ganti oli mesin", "Ganti minyak rem"];
 // Routine items and their limits come from the service_items table (one
@@ -421,6 +429,12 @@ async function load() {
   S.me = S.data.me || S.me;
   buildDiagram(S.data.diagramOverrides);
   render();
+  if (S.draft && S.me && S.draft.mechId === S.me.id) {
+    S.sheet = { ...S.draft.sheet, shown: false };
+    renderSheet();
+    toast("Isian tadi masih ada.");
+  }
+  S.draft = null;
 }
 
 // ---------- derived data ----------
@@ -724,7 +738,7 @@ function renderLock() {
         <span class="avatar ${L.pick === m.id ? "" : "alt"}" style="width:56px;height:56px;border-radius:28px;font-size:24px">${initial(m.name)}</span>
         <span class="grow"><span class="title" style="font-size:22px">${esc(m.name)}</span><span class="meta">${m.has_pin ? "Masukkan PIN" : "Belum punya PIN — buat sekarang"}</span></span>${chevron(L.pick === m.id ? "#8B1A1A" : "#B0A594")}
       </button>`).join("") || `<div class="empty-note">Memuat…</div>`}</div>
-      <span class="hint">Terkunci sendiri setelah 2 menit tidak disentuh.</span>
+      <span class="hint">Terkunci sendiri setelah 5 menit tidak dipakai.</span>
     </div>
     <div class="lock-right">
       <div class="stack" style="align-items:center;gap:16px">
@@ -781,6 +795,9 @@ function touch() {
 }
 function lockNow(expired) {
   flushPending();
+  // Whatever was half-filled stays for the same mechanic's next PIN; anyone
+  // else starts clean.
+  S.draft = S.sheet && S.me ? { mechId: S.me.id, sheet: S.sheet } : null;
   if (S.session && !expired && S.mode === "tablet") api("logout").catch(() => {});
   S.session = null; S.me = null; S.data = null; S.sheet = null;
   S.view = "board"; S.truckId = null;
@@ -874,6 +891,11 @@ document.addEventListener("click", async (ev) => {
   }
 });
 document.addEventListener("pointerdown", touch, { passive: true });
+// Typing a note and scrolling are use too -- counting only taps locked the
+// tablet in the middle of a long note.
+document.addEventListener("keydown", touch, { passive: true });
+document.addEventListener("wheel", touch, { passive: true });
+document.addEventListener("scroll", touch, { passive: true, capture: true });
 window.addEventListener("resize", () => { if (S.data) render(); });
 
 // ---------- photos ----------
@@ -933,21 +955,49 @@ function renderSheet() {
   if (ta && s.focus === ta.dataset.bind) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
   root.querySelectorAll(".photo img").forEach((im) => { if (im.complete) nudgeSpots(im.parentNode); else im.addEventListener("load", () => nudgeSpots(im.parentNode), { once: true }); });
 }
-// The dots are placed for the dashboard's wide screen; on a tablet or phone
-// the labels are bigger relative to the photo and some land on top of each
-// other. Push the lower of two overlapping labels down until it's clear.
+// Labels are much bigger than the dashboard's dots, so neighbours collide.
+// The dots never move. Lowest labels keep their place; a colliding label
+// is lifted higher on its stem, or else hangs below its dot, or else slides
+// sideways -- whichever first lands clear and inside the photo.
 function nudgeSpots(photo) {
-  const spots = [...photo.querySelectorAll(".spot")];
-  spots.forEach((sp) => { sp.style.marginTop = ""; });
-  const boxes = spots.map((el) => ({ el, r: el.getBoundingClientRect(), dy: 0 })).sort((a, b) => a.r.top - b.r.top);
-  boxes.forEach((b, i) => {
-    for (let j = 0; j < i; j++) {
-      const a = boxes[j];
-      const aTop = a.r.top + a.dy, bTop = b.r.top + b.dy;
-      const overlapX = a.r.left < b.r.right - 2 && b.r.left < a.r.right - 2;
-      if (overlapX && bTop < aTop + a.r.height + 2 && bTop + b.r.height > aTop) b.dy = aTop + a.r.height + 4 - b.r.top;
-    }
-    if (b.dy) b.el.style.marginTop = b.dy + "px";
+  const pins = [...photo.querySelectorAll(".spot.pin")];
+  pins.forEach((el) => { el.style.removeProperty("--lift"); el.style.removeProperty("--dx"); el.classList.remove("below"); });
+  const pr = photo.getBoundingClientRect();
+  const placed = [];
+  const inside = (r) => r.left >= pr.left + 2 && r.right <= pr.right - 2 && r.top >= pr.top + 2 && r.bottom <= pr.bottom - 2;
+  const hitOf = (r) => placed.find((a) => a.left < r.right - 2 && r.left < a.right - 2 && r.top < a.bottom + 2 && r.bottom > a.top - 2);
+  const at = (r, dx, dy) => ({ left: r.left + dx, right: r.right + dx, top: r.top + dy, bottom: r.bottom + dy });
+  pins.map((el) => ({ el, r: el.getBoundingClientRect() })).sort((a, b) => b.r.bottom - a.r.bottom).forEach(({ el, r }) => {
+    const h = r.bottom - r.top;
+    const edgeDx = r.left < pr.left + 4 ? pr.left + 4 - r.left : r.right > pr.right - 4 ? pr.right - 4 - r.right : 0;
+    const belowDy = h + 24; // label under the dot: dot sits 12px from either edge
+    const liftAt = (dx) => {
+      let lift = 0;
+      for (let k = 0; k < 8; k++) {
+        const hit = hitOf(at(r, dx, -lift));
+        if (!hit) break;
+        lift += r.bottom - lift - (hit.top - 4);
+      }
+      return lift;
+    };
+    const sides = [30, 60, 90, 120].flatMap((d) => [edgeDx + d, edgeDx - d]);
+    const tries = [
+      { dx: edgeDx, lift: liftAt(edgeDx), below: false },
+      { dx: edgeDx, lift: 0, below: true },
+      ...sides.map((dx) => ({ dx, lift: 0, below: false })),
+      ...sides.map((dx) => ({ dx, lift: liftAt(dx), below: false })),
+      ...sides.map((dx) => ({ dx, lift: 0, below: true })),
+    ];
+    const rectOf = (t) => at(r, t.dx, t.below ? belowDy : -t.lift);
+    // Nothing fully clear (a crowded close-up): least overlap wins.
+    const clash = (q) => placed.reduce((sum, a) => sum + Math.max(0, Math.min(a.right, q.right) - Math.max(a.left, q.left)) * Math.max(0, Math.min(a.bottom, q.bottom) - Math.max(a.top, q.top)), 0);
+    const score = (t) => clash(rectOf(t)) + (inside(rectOf(t)) ? 0 : 1e9);
+    const pick = tries.find((t) => inside(rectOf(t)) && !hitOf(rectOf(t)))
+      || tries.reduce((best, t) => (score(t) < score(best) ? t : best), tries[0]);
+    if (pick.dx) el.style.setProperty("--dx", pick.dx + "px");
+    if (pick.below) el.classList.add("below");
+    else if (pick.lift) el.style.setProperty("--lift", pick.lift + "px");
+    placed.push(rectOf(pick));
   });
 }
 function sheetHead(title, right = "") {
@@ -994,7 +1044,7 @@ function photoPane(s) {
   if (!s.group) {
     const spots = ZONES.map((z) => {
       const n = openIs.filter((i) => z.cats.includes(i.failure_modes && i.failure_modes.category)).length;
-      return `<button class="spot zone ${n ? "open" : ""} ${s.zone === z.key ? "sel" : ""}" style="left:${z.left}%;top:${z.top}%" data-act="l-zone" data-v="${z.key}">${n ? `<span class="n">${n}</span>` : ""}${esc(z.label)}</button>`;
+      return `<button class="spot pin zone ${n ? "open" : ""} ${s.zone === z.key ? "sel" : ""}" style="left:${z.left}%;top:${z.top}%" data-act="l-zone" data-v="${z.key}">${n ? `<span class="n">${n}</span>` : ""}${esc(z.label)}</button>`;
     }).join("");
     return `<div class="stack"><div class="crumbs"><b>${esc(tname)}</b><button data-act="l-ganti">Ganti</button><span class="sep">›</span><span class="sub">Tekan bagian truk</span></div>
       <div class="photo"><img src="${img("truck-side.jpg")}" alt="Truk tampak samping">${spots}</div>
@@ -1011,7 +1061,7 @@ function photoPane(s) {
   const spots = (page.parts || []).map((p, n) => {
     const c = p.id ? openAt(p.id) : 0;
     const sel = s.pick && ((p.id && s.pick.component_position === p.id) || (!p.id && s.pick.fmName === p.fm));
-    return `<button class="spot ${c ? "open" : ""} ${sel ? "sel" : ""}" style="left:${p.left}%;top:${p.top}%" data-act="l-part" data-v="${n}">${c ? `<span class="n">${c}</span>` : ""}${esc(p.label)}</button>`;
+    return `<button class="spot pin ${c ? "open" : ""} ${sel ? "sel" : ""}" style="left:${p.left}%;top:${p.top}%" data-act="l-part" data-v="${n}">${c ? `<span class="n">${c}</span>` : ""}${esc(p.label)}</button>`;
   }).join("") + (page.wheels || []).map((w, n) => {
     const c = openAt(w.code);
     const sel = s.pick && s.pick.wheel_position === w.code;
