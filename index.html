@@ -364,6 +364,25 @@ const POSITION_LABELS = (() => {
   return m;
 })();
 
+// Every problem type that happens at a numbered place on the truck, with
+// its places -- derived from the photos above, so the list and the photos
+// can never disagree. Yohanes, 25 Sep: "I want to know which wheel for
+// things that have position." A report of one of these always says where,
+// however it was picked (photo, list, or the full catalogue).
+const POSITIONS_BY_FM = (() => {
+  const m = {};
+  const add = (fm, pos) => { m[fm] = m[fm] || []; if (!m[fm].some((p) => p.key === pos.key)) m[fm].push(pos); };
+  Object.values(GROUPS).flat().forEach((pg) => {
+    (pg.parts || []).forEach((x) => {
+      if (!x.id) return;
+      const pos = { key: x.id, kind: "component", label: x.label, where: pg.title };
+      if (x.brake) BRAKE_CHOICES.forEach((fm) => add(fm, pos)); else if (x.fm) add(x.fm, pos);
+    });
+    (pg.wheels || []).forEach((w) => WHEEL_CHOICES.forEach((fm) => add(fm, { key: w.code, kind: "wheel", label: "Roda " + w.num })));
+  });
+  return m;
+})();
+
 // ---------- state ----------
 const S = {
   mode: DEMO ? "demo" : tg ? "telegram" : "tablet",
@@ -454,6 +473,19 @@ function issuePlace(i) {
   const cat = i.failure_modes && i.failure_modes.category;
   return [cat ? cat.replace("_", " ") : "", pos].filter(Boolean).join(" · ");
 }
+function positionsFor(fmId) { const f = fmById(fmId); return (f && POSITIONS_BY_FM[f.name]) || null; }
+function missingPosition(fmId, comp, wheel) { return !!positionsFor(fmId) && !comp && !wheel; }
+// "Di mana?" -- wheels on the underside photo (same numbers as the photo
+// route), everything else as buttons named after where they sit.
+function posChooser(fmId, compKey, wheelKey, act) {
+  const list = positionsFor(fmId) || [];
+  if (list[0] && list[0].kind === "wheel") {
+    const page = GROUPS.roda[0];
+    return `<div class="photo"><img src="${img(page.src)}" alt="Roda tampak bawah">${page.wheels.map((w) => `<button class="spot ${wheelKey === w.code ? "open sel" : ""}" style="left:${w.left}%;top:${w.top}%" data-act="${act}" data-k="${w.code}">${w.num}</button>`).join("")}</div>`;
+  }
+  return `<div class="chips">${list.map((p) => `<button class="chip ${compKey === p.key ? "on" : ""}" style="min-height:52px" data-act="${act}" data-k="${esc(p.key)}">${esc(p.label)}<span style="font-weight:500;opacity:.75"> · ${esc(p.where)}</span></button>`).join("")}</div>`;
+}
+function posByKey(fmId, key) { return (positionsFor(fmId) || []).find((p) => p.key === key); }
 function statusChip(status) {
   if (status === "in_progress") return ["st-work", "Dikerjakan"];
   if (status === "request_for_parts") return ["st-amber", "Minta part"];
@@ -654,6 +686,7 @@ function renderIssue(r, i) {
     <div class="issue-top"><span class="pill ${pendingDone ? "st-done" : cls}">${pendingDone ? "Beres" : esc(label)}${i.status === "done" || i.status === "verified" ? esc(who) : ""}</span><span class="sub">${esc(place)}</span></div>
     <h3 class="issue-title">${esc(title)}</h3>
     ${desc ? `<div class="issue-desc">${esc(desc)}</div>` : ""}
+    ${missingPosition(i.failure_mode_id, i.component_position, i.wheel_position) && !isDone(i) ? `<div class="suggest">Posisi belum diisi — ${esc((i.failure_modes && i.failure_modes.category) === "ban" ? "roda" : "bagian")} yang mana?<button data-act="edit" data-iid="${esc(i.id)}">Isi posisi</button></div>` : ""}
     ${i.parts_used && i.status !== "request_for_parts" && i.status !== "vendor_selected" ? `<div class="sub">Part: ${esc(i.parts_used)}</div>` : ""}
     ${actions}
   </article>`;
@@ -980,6 +1013,9 @@ function listPane(s) {
   const zone = ZONES.find((z) => z.key === s.zone);
   const r = openRepairOf(s.truckId);
   let html = "";
+  if (s.pick && missingPosition(s.pick.fmId, s.pick.component_position, s.pick.wheel_position)) {
+    html += `<span class="eyebrow" style="color:var(--accent)">${esc(s.pick.fmName)} — di mana? (wajib)</span>${posChooser(s.pick.fmId, null, null, "l-pos")}`;
+  }
   const zoneOpen = zone ? openIs.filter((i) => zone.cats.includes(i.failure_modes && i.failure_modes.category)) : openIs;
   if (zoneOpen.length) {
     html += `<span class="eyebrow">${zone ? esc(zone.label) + " · " : ""}Masih terbuka</span><div class="group">${zoneOpen.map((i) => `<button class="row selected" data-act="l-existing"><span class="grow"><span class="title">${esc(issueTitle(i))}</span><span class="meta" style="color:var(--accent)">${esc(issuePlace(i) || "")} — sudah dilaporkan, buka</span></span>${chevron("#8B1A1A")}</button>`).join("")}</div>`;
@@ -1016,7 +1052,7 @@ function listPane(s) {
 }
 function fmList(list, s) {
   return `<div class="group">${list.map((f) => {
-    const sel = s.pick && s.pick.fmId === f.id && !s.pick.component_position && !s.pick.wheel_position;
+    const sel = s.pick && s.pick.fmId === f.id;
     return `<button class="row ${sel ? "selected" : ""}" data-act="l-fm" data-id="${esc(f.id)}"><span class="grow"><span class="title" style="font-weight:${sel ? 600 : 500}">${esc(f.name)}</span></span>${sel ? `<svg width="20" height="16" viewBox="0 0 22 18" aria-label="dipilih"><path d="M2 9l6 6L20 3" fill="none" stroke="#8B1A1A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>` : ""}</button>`;
   }).join("") || `<div class="empty-note">Tidak ada.</div>`}</div>`;
 }
@@ -1025,8 +1061,10 @@ function laporFoot(s) {
   const r = s.truckId && openRepairOf(s.truckId);
   const ok = t && s.pick && s.pick.fmId;
   const needsDesc = s.pick && fmById(s.pick.fmId) && fmById(s.pick.fmId).name === "Lainnya" && !s.desc.trim();
+  const needsPos = s.pick && missingPosition(s.pick.fmId, s.pick.component_position, s.pick.wheel_position);
   const sum = ok ? `<b>Truk ${esc(t.nickname || t.id)}</b> · ${esc(s.pick.label)}${r ? " · ditambahkan ke servis #" + esc(r.seq) : " · " + LOCATION_LABELS[s.loc]}` : t ? "Pilih masalahnya di foto atau di daftar." : "Pilih truk.";
-  return `<div class="sheet-foot"><span class="summary">${sum}${needsDesc ? " — tulis catatannya dulu" : ""}</span><button class="btn btn-primary" style="min-width:220px;min-height:60px" data-act="l-save" ${ok && !needsDesc ? "" : "disabled"}>Simpan laporan</button></div>`;
+  const why = needsPos ? " — pilih posisinya dulu" : needsDesc ? " — tulis catatannya dulu" : "";
+  return `<div class="sheet-foot"><span class="summary">${sum}${why}</span><button class="btn btn-primary" style="min-width:220px;min-height:60px" data-act="l-save" ${ok && !needsDesc && !needsPos ? "" : "disabled"}>Simpan laporan</button></div>`;
 }
 
 function rutinBody(s) {
@@ -1109,7 +1147,7 @@ function openEdit(iid) {
   const i = r && r.repair_record_issues.find((x) => x.id === iid);
   if (!i) return;
   const cat = i.failure_modes && i.failure_modes.category;
-  S.sheet = { type: "edit", iid, count: r.repair_record_issues.length, fmId: i.failure_mode_id, cat: cat || null, desc: i.description || "" };
+  S.sheet = { type: "edit", iid, count: r.repair_record_issues.length, fmId: i.failure_mode_id, cat: cat || null, desc: i.description || "", comp: i.component_position || null, wheel: i.wheel_position || null };
   renderSheet();
 }
 function editView(s) {
@@ -1120,10 +1158,11 @@ function editView(s) {
       <div class="chips">${cats.map((c) => `<button class="chip ${c === s.cat ? "on" : ""}" style="min-height:40px;font-size:14px" data-act="e-cat" data-v="${esc(c)}">${esc(c.replace("_", " "))}</button>`).join("")}</div>
       ${fmList(list, { pick: { fmId: s.fmId } })}
     </div><div class="stack">
+      ${positionsFor(s.fmId) ? `<span class="eyebrow" style="${missingPosition(s.fmId, s.comp, s.wheel) ? "color:var(--accent)" : ""}">Di mana? (wajib)</span>${posChooser(s.fmId, s.comp, s.wheel, "e-pos")}` : ""}
       <span class="eyebrow">Catatan</span><textarea class="field" data-bind="desc">${esc(s.desc)}</textarea>
       ${s.count > 1 ? `<button class="btn btn-plain" data-act="e-del" style="color:var(--red)">Hapus masalah ini (salah lapor)</button>` : `<p class="hint">Ini satu-satunya masalah di servis ini, jadi tidak bisa dihapus.</p>`}
     </div></div></div>
-    <div class="sheet-foot"><span class="summary">Posisi di truk tidak berubah.</span><button class="btn btn-primary" style="min-width:220px;min-height:60px" data-act="e-save">Simpan</button></div>`;
+    <div class="sheet-foot"><span class="summary">${missingPosition(s.fmId, s.comp, s.wheel) ? "Pilih posisinya dulu." : esc((posByKey(s.fmId, s.comp || s.wheel) || {}).label || "")}</span><button class="btn btn-primary" style="min-width:220px;min-height:60px" data-act="e-save" ${missingPosition(s.fmId, s.comp, s.wheel) ? "disabled" : ""}>Simpan</button></div>`;
 }
 
 // ----- sheet actions -----
@@ -1162,6 +1201,12 @@ function sheetAction(a, el) {
       s.pop = null; rerender(); return;
     }
     case "l-wheel": { const w = GROUPS[s.group][s.page].wheels[Number(d.v)]; s.pop = { title: "Roda " + w.num, choices: WHEEL_CHOICES, wheelCode: w.code, label: "Roda " + w.num }; rerender(); return; }
+    case "l-pos": {
+      const p = posByKey(s.pick.fmId, d.k);
+      if (!p) return;
+      s.pick = { ...s.pick, component_position: p.kind === "component" ? p.key : null, wheel_position: p.kind === "wheel" ? p.key : null, label: p.label + " · " + s.pick.fmName };
+      rerender(); return;
+    }
     case "l-pop-close": s.pop = null; rerender(); return;
     case "l-pop-pick": {
       const f = fmByName(s.pop.choices[Number(d.v)]);
@@ -1199,10 +1244,18 @@ function sheetAction(a, el) {
       return;
     }
     case "e-cat": s.cat = d.v; rerender(); return;
+    case "e-pos": {
+      const p = posByKey(s.fmId, d.k);
+      if (p) { s.comp = p.kind === "component" ? p.key : null; s.wheel = p.kind === "wheel" ? p.key : null; }
+      rerender(); return;
+    }
     case "e-save": {
       const { iid, fmId, desc } = s;
+      const has = !!positionsFor(fmId);
       closeSheet();
-      run(() => api("update_issue", { id: iid, failure_mode_id: fmId, description: (desc || "").trim() || null }), "Tersimpan.");
+      // A type with no positions carries none: a stale wheel from the old
+      // type would otherwise stay attached to the new one.
+      run(() => api("update_issue", { id: iid, failure_mode_id: fmId, description: (desc || "").trim() || null, component_position: has ? s.comp : null, wheel_position: has ? s.wheel : null }), "Tersimpan.");
       return;
     }
     case "e-del": {
@@ -1216,7 +1269,14 @@ function sheetAction(a, el) {
 // The edit sheet reuses fmList, whose rows fire l-fm -- route that to the edit state.
 document.addEventListener("click", (ev) => {
   const el = ev.target.closest("[data-act='l-fm']");
-  if (el && S.sheet && S.sheet.type === "edit") { ev.stopImmediatePropagation(); S.sheet.fmId = el.dataset.id; renderSheet(); }
+  if (el && S.sheet && S.sheet.type === "edit") {
+    ev.stopImmediatePropagation();
+    const s = S.sheet;
+    s.fmId = el.dataset.id;
+    // Keep the position only if it's a real place for the new type.
+    if (!posByKey(s.fmId, s.comp || s.wheel)) { s.comp = null; s.wheel = null; }
+    renderSheet();
+  }
 }, true);
 
 // ---------- Telegram back button ----------
