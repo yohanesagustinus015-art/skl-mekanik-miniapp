@@ -7,6 +7,8 @@
 <meta name="mobile-web-app-capable" content="yes">
 <title>Bengkel SKL</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
+<!-- The truck diagram, shared with the office dashboard (one definition). -->
+<script src="https://skl-ops.ptmercusuar.com/static/truck-diagram/spec.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -145,6 +147,10 @@ textarea.field { min-height: 88px; resize: vertical; }
 .spot.zone { min-height: 44px; font-size: 15px; }
 .spot.open { background: var(--accent); color: #fff; }
 .spot.sel { outline: 3px solid var(--text); outline-offset: 1px; }
+.photo.crackable img { cursor: crosshair; }
+.crack { position: absolute; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%; background: var(--accent); border: 2px solid #fff; box-shadow: 0 1px 4px rgba(43,36,32,.4); pointer-events: none; }
+.pop.low { top: 76%; } .pop.high { top: 24%; }
+.crack.new { width: 24px; height: 24px; margin: -12px 0 0 -12px; background: rgba(139,26,26,.35); border: 3px solid var(--accent); }
 .spot .n { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px; border-radius: 11px; background: #fff; color: var(--accent); font-size: 12px; font-weight: 700; }
 .thumbs { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(112px, 1fr); gap: 8px; overflow-x: auto; padding-bottom: 2px; }
 .thumb { display: flex; flex-direction: column; gap: 5px; padding: 5px; border-radius: 12px; background: var(--surface); text-align: left; }
@@ -191,6 +197,7 @@ textarea.field { min-height: 88px; resize: vertical; }
   .spot.zone { min-height: 36px; font-size: 13px; }
   /* The photo is ~200px tall on a phone -- the brake/wheel choice opens as a bottom sheet instead of over it. */
   .pop { position: fixed; left: 0; right: 0; top: auto; bottom: 0; transform: none; width: 100%; border-radius: 18px 18px 0 0; padding: 16px 16px calc(20px + env(safe-area-inset-bottom)); z-index: 50; }
+  .pop.low, .pop.high { top: auto; }
   #toast { bottom: calc(86px + env(safe-area-inset-bottom)); }
 }
 @media (min-width: 900px) {
@@ -211,9 +218,10 @@ textarea.field { min-height: 88px; resize: vertical; }
 // key and receives PINs, so a crafted link pointing the page at another
 // server would hand both over.
 const API_URL = "https://kcftvbuwotjjroattdak.supabase.co/functions/v1/mekanik-api";
-const IMG = "https://skl-ops.ptmercusuar.com/static/truck-diagram/";
-const IMG_V = "8";
-const img = (f) => IMG + f + "?v=" + IMG_V;
+const IMG_ORIGIN = "https://skl-ops.ptmercusuar.com";
+// Spec paths are site-absolute ('/static/truck-diagram/x.jpg'); assetVersion
+// busts the browser cache when an image is replaced in place.
+const img = (f) => IMG_ORIGIN + (f.startsWith("/") ? f : "/static/truck-diagram/" + f) + "?v=" + ((window.SKL_TRUCK_DIAGRAM || {}).assetVersion || "0");
 const tg = window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData ? window.Telegram.WebApp : null;
 const DEMO = location.hash === "#demo";
 const LOCK_AFTER_MS = 2 * 60 * 1000;
@@ -268,142 +276,78 @@ const PART_SUGGESTIONS = {
   bak: ["Papan bak", "Baut", "Terpal"],
 };
 
-// ---------- the truck photos: two levels, never deeper ----------
-// Level 1: the side view, one chip per zone. Level 2: the zone's close-up
-// photos as a strip of thumbnails (what used to be text menus). Dot
-// coordinates are the same as dashboard.html's and the old page's; the
-// side-view chips sit at tuned spots so the labels don't overlap.
-// `cats` = the failure_mode categories the zone's list shows.
-const ZONES = [
-  { key: "kabin", label: "Kabin", left: 17, top: 29, cats: ["kabin"], group: "kabin" },
-  { key: "kelistrikan", label: "Listrik", left: 8, top: 47, cats: ["kelistrikan"], group: "kelistrikan" },
-  { key: "mesin", label: "Mesin", left: 18, top: 64, cats: ["mesin"], group: "mesin" },
-  { key: "transmisi", label: "Powertrain", left: 46, top: 58, cats: ["transmisi"], group: "powertrain" },
-  { key: "bahan_bakar", label: "Tangki", left: 38, top: 82, cats: ["bahan_bakar"] },
-  { key: "chassis", label: "Chassis & rem", left: 64, top: 74, cats: ["chassis", "rem"], group: "chassis" },
-  { key: "bak", label: "Body", left: 64, top: 44, cats: ["bak"] },
-  { key: "ban", label: "Roda", left: 84, top: 88, cats: ["ban"], group: "roda" },
-];
-const GROUPS = {
-  kabin: [{ title: "Kabin", src: "truck-cabin.jpg", parts: [
-    { fm: "Dashboard/panel rusak", label: "Dashboard", left: 40, top: 25 },
-    { fm: "AC tidak dingin", label: "AC", left: 27, top: 41 },
-    { fm: "Wiper rusak", label: "Wiper", left: 38.6, top: 18.9 },
-    { fm: "Jok/kursi rusak", label: "Jok/kursi", left: 73.6, top: 45.9 },
-    { fm: "Kaca pecah/retak", label: "Kaca", left: 10, top: 13 },
-  ]}],
-  kelistrikan: [{ title: "Kelistrikan", src: "truck-electrical.jpg", parts: [
-    { fm: "Aki soak", id: "aki-1", label: "Aki 1", left: 26, top: 23 },
-    { fm: "Aki soak", id: "aki-2", label: "Aki 2", left: 60, top: 19 },
-    { fm: "Kepala aki kendor/korosi", id: "kepala-aki-1", label: "Kepala aki 1", left: 38.59, top: 30 },
-    { fm: "Kepala aki kendor/korosi", id: "kepala-aki-2", label: "Kepala aki 2", left: 55.2, top: 8 },
-    { fm: "Kelistrikan lain", label: "Sekring", left: 71, top: 48 },
-  ]}],
-  mesin: [
-    { title: "Mesin (dalam)", src: "truck-engine.jpg", parts: [
-      { fm: "Kruk as rusak", label: "Kruk as", left: 50, top: 88 },
-      { fm: "Turbo rusak", label: "Turbo", left: 62, top: 45 },
-      { fm: "Pompa injeksi/injektor bermasalah", label: "Injektor", left: 78, top: 15 },
-      { fm: "Kebocoran oli", label: "Bocor oli", left: 35, top: 85 },
-      { fm: "Pompa air (water pump) bocor", label: "Pompa air", left: 12, top: 40 },
-    ]},
-    { title: "Radiator", src: "truck-radiator.jpg", parts: [
-      { fm: "Radiator bocor", label: "Radiator", left: 55, top: 15 },
-    ]},
-    { title: "Bak oli & hidrolik", src: "truck-engine-oilpan-hydraulic.jpg", parts: [
-      { fm: "Kebocoran oli", label: "Bak oli", left: 42, top: 48 },
-      { fm: "Pompa hidrolik bocor/rusak", label: "Pompa hidrolik", left: 61, top: 48 },
-    ]},
-    { title: "Mesin luar", src: "truck-engine-exterior.jpg", parts: [
-      { fm: "Alternator/dinamo rusak", label: "Alternator", left: 49, top: 34 },
-      { routine: "filter_solar", label: "Filter solar", left: 62.9, top: 49.6 },
-      { routine: "filter_oli", label: "Filter oli", left: 58.9, top: 79.3 },
-      { fm: "Dinamo starter rusak", label: "Starter", left: 75.5, top: 64 },
-    ]},
-  ],
-  powertrain: [{ title: "Powertrain", src: "truck-underside.jpg", parts: [
-    { fm: "Gearbox/transmisi bermasalah", label: "Transmisi", left: 14, top: 49 },
-    { fm: "Kopel/as kopel rusak", id: "powertrain-kopel-1", label: "Kopel 1", left: 45, top: 50 },
-    { fm: "As roda/gardan rusak", id: "powertrain-gardan-1", label: "Gardan 1", left: 72, top: 48 },
-    { fm: "Kopel/as kopel rusak", id: "powertrain-kopel-2", label: "Kopel 2", left: 79, top: 62 },
-    { fm: "As roda/gardan rusak", id: "powertrain-gardan-2", label: "Gardan 2", left: 87, top: 48 },
-  ]}],
-  chassis: [
-    { title: "Kaki-kaki depan", src: "truck-chassis-front.jpg", parts: [
-      { fm: "Kaki-kaki/tie rod rusak", id: "kakikaki-1", label: "Kaki-kaki 1", left: 37, top: 27 },
-      { fm: "Kaki-kaki/tie rod rusak", id: "kakikaki-2", label: "Kaki-kaki 2", left: 37, top: 73 },
-      { fm: "Power steering bermasalah", label: "Power steering", left: 67, top: 29 },
-    ]},
-    { title: "Per & rem depan", src: "truck-chassis-front-leafspring-shock.jpg", parts: [
-      { fm: "Per/suspensi patah", id: "per-1", label: "Per 1", left: 30, top: 58 },
-      { fm: "Shockbreaker rusak", id: "shock-1", label: "Shock 1", left: 32.7, top: 18 },
-      { fm: "Per/suspensi patah", id: "per-2", label: "Per 2", left: 62.4, top: 51.8 },
-      { fm: "Shockbreaker rusak", id: "shock-2", label: "Shock 2", left: 71.7, top: 34.7 },
-      { brake: true, id: "rem-1", label: "Rem 1", left: 16, top: 40 },
-      { brake: true, id: "rem-2", label: "Rem 2", left: 86, top: 57 },
-    ]},
-    { title: "Kaki-kaki belakang", src: "truck-chassis-rear.jpg", parts: [
-      { fm: "Kaki-kaki/tie rod rusak", id: "kakikaki-3", label: "Kaki-kaki 3", left: 27.3, top: 38.1 },
-      { fm: "Kaki-kaki/tie rod rusak", id: "kakikaki-4", label: "Kaki-kaki 4", left: 27.3, top: 59.7 },
-      { fm: "Kaki-kaki/tie rod rusak", id: "kakikaki-5", label: "Kaki-kaki 5", left: 61.9, top: 38.1 },
-      { fm: "Kaki-kaki/tie rod rusak", id: "kakikaki-6", label: "Kaki-kaki 6", left: 61.9, top: 59.7 },
-    ]},
-    { title: "Tandem 1", src: "truck-chassis-rear-tandem-side.jpg", parts: [
-      { brake: true, id: "rem-3", label: "Rem 3", left: 42, top: 58 },
-      { fm: "Per/suspensi patah", id: "per-3", label: "Per 3", left: 52, top: 29 },
-      { brake: true, id: "rem-4", label: "Rem 4", left: 77, top: 55 },
-    ]},
-    { title: "Tandem 2", src: "truck-chassis-rear-axle2.jpg", parts: [
-      { brake: true, id: "rem-5", label: "Rem 5", left: 17, top: 68 },
-      { fm: "Per/suspensi patah", id: "per-4", label: "Per 4", left: 45, top: 48 },
-      { brake: true, id: "rem-6", label: "Rem 6", left: 89, top: 46 },
-    ]},
-  ],
-  roda: [
-    { title: "Roda (tampak bawah)", src: "truck-underside.jpg", wheels: [
-      { code: "FL", num: 1, left: 8, top: 8 }, { code: "FR", num: 2, left: 8, top: 92 },
-      { code: "RL1_OUT", num: 3, left: 70, top: 8 }, { code: "RL1_IN", num: 4, left: 76, top: 22 },
-      { code: "RR1_OUT", num: 5, left: 70, top: 92 }, { code: "RR1_IN", num: 6, left: 76, top: 78 },
-      { code: "RL2_OUT", num: 7, left: 90, top: 8 }, { code: "RL2_IN", num: 8, left: 96, top: 22 },
-      { code: "RR2_OUT", num: 9, left: 90, top: 92 }, { code: "RR2_IN", num: 10, left: 96, top: 78 },
-    ]},
-    { title: "Velg & baud", src: "truck-wheel-rim.jpg", parts: [
-      { fm: "Velg rusak/penyok", label: "Velg", left: 32, top: 45 },
-      { fm: "Baud roda kendor/patah", label: "Baud roda", left: 61, top: 32 },
-    ]},
-  ],
+// ---------- the truck diagram: shared with the dashboard ----------
+// Pictures, dots and position lists come from skl-route-agent's
+// static/truck-diagram/spec.js -- the same file dashboard.html draws from
+// (2026-09-25; this page used to carry a hand-copied snapshot that fell
+// behind by 5 pictures, ~15 dots and every director drag correction).
+// The director's corrections (truck_diagram_hotspot_overrides, keyed
+// '<imageKey>::<id|key>') and each truck's chassis crack marks arrive
+// with init_data and are applied exactly as the dashboard applies them.
+// Presented in two levels, never deeper: level 1 the side view, level 2
+// every close-up of a zone as a strip of thumbnails.
+const SPEC = window.SKL_TRUCK_DIAGRAM || null;
+// App-side presentation only: which catalogue categories a zone's list
+// shows, and short thumbnail titles.
+const ZONE_CATS = { chassis: ["chassis", "rem"], ban: ["ban"], transmisi: ["transmisi"] };
+const PAGE_TITLES = {
+  "truck-engine.jpg": "Mesin (dalam)", "truck-radiator.jpg": "Radiator", "truck-engine-oilpan-hydraulic.jpg": "Bak oli & hidrolik",
+  "truck-engine-exterior.jpg": "Mesin luar", "truck-electrical.jpg": "Aki & sekring", "truck-front.jpg": "Lampu depan",
+  "truck-rear.jpg": "Lampu belakang", "truck-chassis-frame.jpg": "Rangka (retak)", "truck-chassis-front.jpg": "Kaki-kaki depan",
+  "truck-chassis-front-leafspring-shock.jpg": "Per & rem depan", "truck-chassis-rear.jpg": "Kaki-kaki belakang",
+  "truck-chassis-rear-tandem-side.jpg": "Tandem 1", "truck-chassis-rear-axle2.jpg": "Tandem 2", "truck-transmission.jpg": "Transmisi",
+  "truck-clutch-hydraulic.jpg": "Kopling hidrolik", "truck-cabin.jpg": "Kabin", "truck-wheel-rim.jpg": "Velg & baud", "truck-brake.jpg": "Rem",
 };
-// A numbered brake used to open a third picture (Detail Rem). It is a small
-// choice over the photo now, and keeps the wheel-end it came from.
-const BRAKE_CHOICES = ["Kampas rem habis", "Rem blong", "Bearing/laher rusak", "Selang rem bocor/rusak"];
-const WHEEL_CHOICES = ["Ban bocor/pecah", "Baud roda kendor/patah", "Velg rusak/penyok"];
-const POSITION_LABELS = (() => {
-  const m = {};
-  Object.values(GROUPS).flat().forEach((p) => {
-    (p.parts || []).forEach((x) => { if (x.id) m[x.id] = x.label; });
-    (p.wheels || []).forEach((w) => { m[w.code] = "Roda " + w.num; });
-  });
-  return m;
-})();
+// The engine photo's two filter dots are named after the old "Ganti filter"
+// failure modes; here they are routine service (the truck has two fuel
+// filters, so the fuel-filter dot asks which).
+const ROUTINE_BY_FM = { "Ganti filter oli": "filter_oli", "Ganti filter solar": "filter_solar" };
+const CRACK_FMS = ["Chassis retak/las", "Chassis retak/lakop"];
+let ZONES = [], GROUPS = {}, WHEEL_PAGE = null, BRAKE_CHOICES = [], WHEEL_CHOICES = [], POSITION_LABELS = {}, POSITIONS_BY_FM = {};
 
-// Every problem type that happens at a numbered place on the truck, with
-// its places -- derived from the photos above, so the list and the photos
-// can never disagree. Yohanes, 25 Sep: "I want to know which wheel for
-// things that have position." A report of one of these always says where,
-// however it was picked (photo, list, or the full catalogue).
-const POSITIONS_BY_FM = (() => {
-  const m = {};
-  const add = (fm, pos) => { m[fm] = m[fm] || []; if (!m[fm].some((p) => p.key === pos.key)) m[fm].push(pos); };
-  Object.values(GROUPS).flat().forEach((pg) => {
-    (pg.parts || []).forEach((x) => {
-      if (!x.id) return;
-      const pos = { key: x.id, kind: "component", label: x.label, where: pg.title };
-      if (x.brake) BRAKE_CHOICES.forEach((fm) => add(fm, pos)); else if (x.fm) add(x.fm, pos);
-    });
-    (pg.wheels || []).forEach((w) => WHEEL_CHOICES.forEach((fm) => add(fm, { key: w.code, kind: "wheel", label: "Roda " + w.num })));
+function buildDiagram(overrides) {
+  if (!SPEC) return;
+  const ov = {};
+  (overrides || []).forEach((o) => { ov[o.slot_id] = o; });
+  const at = (imageKey, slot, left, top) => {
+    const o = ov[imageKey + "::" + slot];
+    return o ? { left: Number(o.left_pct), top: Number(o.top_pct) } : { left: parseFloat(left), top: parseFloat(top) };
+  };
+  const base = (src) => src.split("/").pop();
+  const part = (imageKey, h) => ({
+    id: h.id || null, fm: h.key, label: h.caption || h.label, ...at(imageKey, h.id || h.key, h.left, h.top),
+    brake: !!(h.id && h.id.indexOf("rem-") === 0), routine: ROUTINE_BY_FM[h.key] || null,
   });
-  return m;
-})();
+  const detailPages = (zone) => (SPEC.details[zone] || []).map((d, i) => {
+    const imageKey = zone + "-" + i;
+    return { title: PAGE_TITLES[base(d.src)] || d.alt, src: d.src, imageKey,
+      crack: zone === "chassis" && i === 0, parts: d.hotspots.map((h) => part(imageKey, h)) };
+  });
+  WHEEL_PAGE = { title: "Roda (tampak bawah)", src: "/static/truck-diagram/truck-underside.jpg", imageKey: "underside",
+    wheels: SPEC.wheels.map((w) => ({ code: w.code, num: w.num, ...at("underside", w.code, w.left, w.top) })) };
+  const powertrainPage = { title: "Powertrain (tampak bawah)", src: "/static/truck-diagram/truck-underside.jpg", imageKey: "underside",
+    parts: SPEC.powertrain.map((h) => part("underside", h)) };
+  GROUPS = {
+    mesin: detailPages("mesin"), kelistrikan: detailPages("kelistrikan"), chassis: detailPages("chassis"), kabin: detailPages("kabin"),
+    transmisi: [powertrainPage, ...detailPages("transmisi")], ban: [WHEEL_PAGE, ...detailPages("roda")],
+  };
+  ZONES = SPEC.zones.map((z) => ({ key: z.key, label: z.label, ...at("side", z.key, z.left, z.top),
+    cats: ZONE_CATS[z.key] || [z.key], group: GROUPS[z.key] && GROUPS[z.key].length ? z.key : null }));
+  BRAKE_CHOICES = SPEC.brakeChoices || [];
+  WHEEL_CHOICES = SPEC.wheelFms || [];
+  // Positions: the spec's explicit list, labelled with the picture each
+  // place sits on; wheels for the wheel problems.
+  const where = {};
+  Object.values(GROUPS).flat().forEach((pg) => (pg.parts || []).forEach((p) => { if (p.id && !where[p.id]) where[p.id] = pg.title; }));
+  POSITIONS_BY_FM = {};
+  Object.entries(SPEC.positions || {}).forEach(([fm, list]) => {
+    POSITIONS_BY_FM[fm] = list.map(([key, label]) => ({ key, kind: "component", label, where: where[key] || "" }));
+  });
+  WHEEL_CHOICES.forEach((fm) => { POSITIONS_BY_FM[fm] = WHEEL_PAGE.wheels.map((w) => ({ key: w.code, kind: "wheel", label: "Roda " + w.num })); });
+  POSITION_LABELS = {};
+  Object.values(GROUPS).flat().forEach((pg) => (pg.parts || []).forEach((p) => { if (p.id) POSITION_LABELS[p.id] = p.label; }));
+  Object.values(POSITIONS_BY_FM).flat().forEach((p) => { POSITION_LABELS[p.key] = p.label; });
+}
 
 // ---------- state ----------
 const S = {
@@ -475,6 +419,7 @@ async function api(action, payload = {}) {
 async function load() {
   S.data = await api("init_data");
   S.me = S.data.me || S.me;
+  buildDiagram(S.data.diagramOverrides);
   render();
 }
 
@@ -491,7 +436,7 @@ function issueTitle(i) {
   return i.description || fm || "(tanpa keterangan)";
 }
 function issuePlace(i) {
-  const pos = POSITION_LABELS[i.component_position] || POSITION_LABELS[i.wheel_position] || "";
+  const pos = POSITION_LABELS[i.component_position] || POSITION_LABELS[i.wheel_position] || i.chassis_position || "";
   const cat = i.failure_modes && i.failure_modes.category;
   return [cat ? cat.replace("_", " ") : "", pos].filter(Boolean).join(" · ");
 }
@@ -502,7 +447,7 @@ function missingPosition(fmId, comp, wheel) { return !!positionsFor(fmId) && !co
 function posChooser(fmId, compKey, wheelKey, act) {
   const list = positionsFor(fmId) || [];
   if (list[0] && list[0].kind === "wheel") {
-    const page = GROUPS.roda[0];
+    const page = WHEEL_PAGE;
     return `<div class="photo"><img src="${img(page.src)}" alt="Roda tampak bawah">${page.wheels.map((w) => `<button class="spot ${wheelKey === w.code ? "open sel" : ""}" style="left:${w.left}%;top:${w.top}%" data-act="${act}" data-k="${w.code}">${w.num}</button>`).join("")}</div>`;
   }
   return `<div class="chips">${list.map((p) => `<button class="chip ${compKey === p.key ? "on" : ""}" style="min-height:52px" data-act="${act}" data-k="${esc(p.key)}">${esc(p.label)}<span style="font-weight:500;opacity:.75"> · ${esc(p.where)}</span></button>`).join("")}</div>`;
@@ -883,8 +828,10 @@ async function run(fn, okMsg) {
   } catch (e) { toast("Gagal: " + e.message); haptic("error"); }
 }
 
+let lastTap = null; // where the last tap landed, for marking a crack on the frame photo
 document.addEventListener("click", async (ev) => {
   const el = ev.target.closest("[data-act]");
+  lastTap = [ev.clientX, ev.clientY];
   touch();
   if (!el || el.disabled) return;
   // The backdrop closes the sheet only when it is itself what was tapped,
@@ -984,6 +931,24 @@ function renderSheet() {
   if (nb && !first) nb.scrollTop = scrollTop;
   const ta = root.querySelector("textarea[data-bind]");
   if (ta && s.focus === ta.dataset.bind) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+  root.querySelectorAll(".photo img").forEach((im) => { if (im.complete) nudgeSpots(im.parentNode); else im.addEventListener("load", () => nudgeSpots(im.parentNode), { once: true }); });
+}
+// The dots are placed for the dashboard's wide screen; on a tablet or phone
+// the labels are bigger relative to the photo and some land on top of each
+// other. Push the lower of two overlapping labels down until it's clear.
+function nudgeSpots(photo) {
+  const spots = [...photo.querySelectorAll(".spot")];
+  spots.forEach((sp) => { sp.style.marginTop = ""; });
+  const boxes = spots.map((el) => ({ el, r: el.getBoundingClientRect(), dy: 0 })).sort((a, b) => a.r.top - b.r.top);
+  boxes.forEach((b, i) => {
+    for (let j = 0; j < i; j++) {
+      const a = boxes[j];
+      const aTop = a.r.top + a.dy, bTop = b.r.top + b.dy;
+      const overlapX = a.r.left < b.r.right - 2 && b.r.left < a.r.right - 2;
+      if (overlapX && bTop < aTop + a.r.height + 2 && bTop + b.r.height > aTop) b.dy = aTop + a.r.height + 4 - b.r.top;
+    }
+    if (b.dy) b.el.style.marginTop = b.dy + "px";
+  });
 }
 function sheetHead(title, right = "") {
   return `<div class="sheet-head"><button data-act="sheet-close">Batal</button><span class="t">${title}</span><span style="justify-self:end">${right}</span></div>`;
@@ -999,7 +964,7 @@ document.addEventListener("input", (ev) => {
 
 // ----- Lapor (report a problem / routine service) -----
 function openLapor(truckId) {
-  S.sheet = { type: "lapor", tab: "masalah", truckId, zone: null, group: null, page: 0, pick: null, pop: null, all: false, allCat: null, desc: "", loc: "pool", suggestion: null, rItem: null, rDate: new Date().toISOString().slice(0, 10), rQty: 0, rNotes: "", rLast: null };
+  S.sheet = { type: "lapor", tab: "masalah", truckId, zone: null, group: null, page: 0, pick: null, pop: null, all: !ZONES.length, allCat: null, desc: "", loc: "pool", suggestion: null, rItem: null, rDate: new Date().toISOString().slice(0, 10), rQty: 0, rNotes: "", rLast: null };
   renderSheet();
 }
 function newIssueModes(cats) {
@@ -1024,6 +989,8 @@ function laporView(s) {
 function photoPane(s) {
   const tname = (() => { const t = (S.data.trucks || []).find((x) => x.id === s.truckId); return t ? "Truk " + (t.nickname || t.id) : ""; })();
   const openIs = openIssuesOnTruck(s.truckId);
+  // No diagram (spec.js didn't load): the list on the right still works.
+  if (!ZONES.length) return `<div class="stack"><div class="crumbs"><b>${esc(tname)}</b><button data-act="l-ganti">Ganti</button></div><div class="empty-note">Gambar truk tidak termuat. Pilih masalahnya dari daftar.</div></div>`;
   if (!s.group) {
     const spots = ZONES.map((z) => {
       const n = openIs.filter((i) => z.cats.includes(i.failure_modes && i.failure_modes.category)).length;
@@ -1049,10 +1016,21 @@ function photoPane(s) {
     const c = openAt(w.code);
     const sel = s.pick && s.pick.wheel_position === w.code;
     return `<button class="spot ${c ? "open" : ""} ${sel ? "sel" : ""}" style="left:${w.left}%;top:${w.top}%" data-act="l-wheel" data-v="${n}">${w.num}</button>`;
-  }).join("");
-  const pop = s.pop ? `<div class="pop"><div class="h"><span>${esc(s.pop.title)} — apa masalahnya?</span><button class="linkbtn" data-act="l-pop-close" aria-label="Tutup">Tutup</button></div>${s.pop.choices.map((c, n) => fmByName(c) ? `<button class="choice" data-act="l-pop-pick" data-v="${n}">${esc(c)}</button>` : "").join("")}</div>` : "";
+  }).join("") + (page.crack ? crackDots(s) : "");
+  const pop = s.pop ? `<div class="pop ${s.pop.crackAt ? (s.pop.crackAt.top_pct < 50 ? "low" : "high") : ""}"><div class="h"><span>${esc(s.pop.title)} — apa masalahnya?</span><button class="linkbtn" data-act="l-pop-close" aria-label="Tutup">Tutup</button></div>${s.pop.choices.map((c, n) => fmByName(c) ? `<button class="choice" data-act="l-pop-pick" data-v="${n}">${esc(c)}</button>` : "").join("")}</div>` : "";
+  const hint = page.crack ? `<span class="hint">Tekan tepat di tempat retaknya. Titik merah = retak yang pernah dicatat di truk ini.</span>` : "";
   return `<div class="stack"><div class="crumbs"><button data-act="l-up">${esc(tname)}</button><span class="sep">›</span><b>${esc(zone ? zone.label : "")}</b>${pages.length > 1 ? `<span class="sep">›</span><span class="sub">${esc(page.title)}</span>` : ""}</div>
-    ${thumbs}<div class="photo"><img src="${img(page.src)}" alt="${esc(page.title)}">${spots}${pop}</div></div>`;
+    ${thumbs}<div class="photo ${page.crack ? "crackable" : ""}"><img src="${img(page.src)}" alt="${esc(page.title)}" ${page.crack ? `data-act="l-crack"` : ""}>${spots}${pop}</div>${hint}</div>`;
+}
+// The frame photo is a crack map: earlier cracks on this truck stay as dots
+// (the same points the dashboard draws), and the one being reported now is
+// the ringed dot.
+function crackDots(s) {
+  const old = (S.data.crackPoints || []).filter((c) => c.truck_id === s.truckId && c.image_key === "chassis-0");
+  const cp = s.pick && s.pick.crack_point;
+  return old.map((c) => `<span class="crack" style="left:${Number(c.left_pct)}%;top:${Number(c.top_pct)}%" title="${esc(c.caption || c.match_key || "")}"></span>`).join("")
+    + (cp ? `<span class="crack new" style="left:${cp.left_pct}%;top:${cp.top_pct}%"></span>` : "")
+    + (s.pop && s.pop.crackAt ? `<span class="crack new" style="left:${s.pop.crackAt.left_pct}%;top:${s.pop.crackAt.top_pct}%"></span>` : "");
 }
 
 function listPane(s) {
@@ -1086,7 +1064,7 @@ function listPane(s) {
       const sel = s.pick && ((p.id && s.pick.component_position === p.id) || (!p.id && s.pick.fmName === p.fm && !s.pick.component_position));
       const sub = p.routine ? "Servis rutin — catat ganti" : p.brake ? "Rem — pilih masalahnya" : p.fm;
       return `<button class="row ${sel ? "selected" : ""}" data-act="l-part" data-v="${n}"><span class="grow"><span class="title">${esc(p.label)}</span><span class="meta">${esc(sub)}</span></span>${chevron()}</button>`;
-    }).join("")}${(page.wheels || []).length ? `<div class="row"><span class="grow"><span class="meta">Tekan nomor roda di foto.</span></span></div>` : ""}</div>`;
+    }).join("")}${(page.wheels || []).length ? `<div class="row"><span class="grow"><span class="meta">Tekan nomor roda di foto.</span></span></div>` : ""}${page.crack ? `<div class="row"><span class="grow"><span class="meta">Chassis retak? Tekan tempat retaknya di foto.</span></span></div>` : ""}</div>`;
   } else {
     html += fmList(newIssueModes(zone.cats), s);
     if (zone.group) html += `<button class="btn btn-dark btn-block" data-act="l-into">Tunjuk di foto ${esc(zone.label.toLowerCase())} ›</button>`;
@@ -1222,7 +1200,7 @@ function sheetAction(a, el) {
   const rerender = () => renderSheet();
   switch (a) {
     case "l-tab": s.tab = d.v; rerender(); if (s.tab === "rutin") loadRoutineLast(s); return;
-    case "l-truck": Object.assign(s, { truckId: d.id, pickTruck: false, zone: null, group: null, page: 0, pick: null, pop: null, all: false }); rerender(); if (s.tab === "rutin") loadRoutineLast(s); return;
+    case "l-truck": Object.assign(s, { truckId: d.id, pickTruck: false, zone: null, group: null, page: 0, pick: null, pop: null, all: !ZONES.length }); rerender(); if (s.tab === "rutin") loadRoutineLast(s); return;
     case "l-ganti": s.pickTruck = true; rerender(); return;
     case "l-zone": {
       const z = ZONES.find((x) => x.key === d.v);
@@ -1256,16 +1234,25 @@ function sheetAction(a, el) {
       s.pick = { ...s.pick, component_position: p.kind === "component" ? p.key : null, wheel_position: p.kind === "wheel" ? p.key : null, label: p.label + " · " + s.pick.fmName };
       rerender(); return;
     }
+    case "l-crack": {
+      const b = el.getBoundingClientRect();
+      if (!b.width || !lastTap) return;
+      const pt = { left_pct: Math.round(((lastTap[0] - b.left) / b.width) * 1000) / 10, top_pct: Math.round(((lastTap[1] - b.top) / b.height) * 1000) / 10 };
+      s.pop = { title: "Rangka", choices: CRACK_FMS, crackAt: pt, label: "Rangka" };
+      rerender(); return;
+    }
     case "l-pop-close": s.pop = null; rerender(); return;
     case "l-pop-pick": {
       const f = fmByName(s.pop.choices[Number(d.v)]);
-      if (f) s.pick = { fmId: f.id, fmName: f.name, component_position: s.pop.positionId || null, wheel_position: s.pop.wheelCode || null, label: s.pop.label + " · " + f.name };
+      const c = s.pop.crackAt;
+      if (f && c) s.pick = { fmId: f.id, fmName: f.name, label: "Rangka · " + f.name, chassis_position: `Rangka ${Math.round(c.left_pct)}% ${Math.round(c.top_pct)}%`, crack_point: c };
+      else if (f) s.pick = { fmId: f.id, fmName: f.name, component_position: s.pop.positionId || null, wheel_position: s.pop.wheelCode || null, label: s.pop.label + " · " + f.name };
       s.pop = null; rerender(); return;
     }
     case "l-existing": { const tid = s.truckId; closeSheet(); S.truckId = tid; S.view = "truck"; render(); return; }
     case "l-save": {
       const r = openRepairOf(s.truckId);
-      const payload = { failure_mode_id: s.pick.fmId, description: s.desc.trim() || null, wheel_position: s.pick.wheel_position || null, component_position: s.pick.component_position || null };
+      const payload = { failure_mode_id: s.pick.fmId, description: s.desc.trim() || null, wheel_position: s.pick.wheel_position || null, component_position: s.pick.component_position || null, chassis_position: s.pick.chassis_position || null, crack_point: s.pick.crack_point || null };
       const tid = s.truckId;
       closeSheet();
       S.truckId = tid; S.view = "truck";
@@ -1359,6 +1346,7 @@ function makeDemo() {
     fm("f5", "Per/suspensi patah", "chassis"), fm("f6", "Chassis retak/las", "chassis"), fm("f7", "Gearbox/transmisi bermasalah", "transmisi"), fm("f8", "Kopling rusak", "transmisi"),
     fm("f9", "Ban bocor/pecah", "ban"), fm("f10", "Baud roda kendor/patah", "ban"), fm("f11", "Velg rusak/penyok", "ban"), fm("f12", "Aki soak", "kelistrikan"),
     fm("f13", "Turbo rusak", "mesin"), fm("f14", "Kebocoran oli", "mesin"), fm("f15", "Lainnya", "lainnya"), fm("f16", "Kopel/as kopel rusak", "transmisi"), fm("f17", "Shockbreaker rusak", "chassis"),
+    fm("f18", "Chassis retak/las", "chassis"), fm("f19", "Chassis retak/lakop", "chassis"),
   ];
   const f = (id) => failureModes.find((x) => x.id === id);
   const mechanics = [{ id: "m-oki", name: "Oki" }, { id: "m-surady", name: "Surady" }];
@@ -1378,7 +1366,11 @@ function makeDemo() {
     due("93", "oli_mesin", "lewat", { last_date: "2026-07-01", km_left: -1200, days_left: -26 }),
   ];
   return {
-    mechanics, failureModes, vendors: [], serviceItems, serviceDue,
+    mechanics, failureModes, vendors: [], serviceItems, serviceDue, diagramOverrides: [],
+    crackPoints: [
+      { id: "c1", truck_id: "96", image_key: "chassis-0", match_key: "Chassis retak/las", caption: "retak/las · 12 Agu", left_pct: 38, top_pct: 44 },
+      { id: "c2", truck_id: "96", image_key: "chassis-0", match_key: "Chassis retak/lakop", caption: "retak/lakop · 3 Sep", left_pct: 71, top_pct: 57 },
+    ],
     trucks: ["07", "11", "51", "52", "65", "93", "95", "96"].map((id) => ({ id, nickname: id, plate: "B 9" + id + " XX" })),
     truckStates: [["07", "IDLE_UNKNOWN"], ["11", "UNDER_REPAIR"], ["51", "FERRY"], ["52", "IN_TRANSIT"], ["65", "FERRY"], ["93", "IN_TRANSIT"], ["95", "FERRY"], ["96", "UNDER_REPAIR"]].map(([truck_id, state]) => ({ truck_id, state })),
     openRepairs: [
