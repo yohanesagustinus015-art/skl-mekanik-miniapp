@@ -1,1584 +1,1304 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="id">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-<title>Formulir Servis - PT SKL</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#F5F2EE">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Bengkel SKL</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<!--
+  Mechanic app, redesigned 2026-09-24 (canvas: claude.ai/artifact/QsyKkNTwVcYbPgEzBK6CFC).
+  ONE page, two ways in:
+   - phone: opened from SKL_Lapangan_bot in Telegram; identity = Telegram;
+   - workshop tablet (Android, landscape): opened in the browser; the tablet
+     is registered once (#setup=<key>), then each mechanic picks their name
+     and enters a 4-digit PIN. It locks itself after 2 minutes untouched.
+  This file is the source of truth for the page (the PAGE constant in
+  os/driver-bot/.../mekanik-miniapp had drifted behind it).
+  Theme = the SKL apps' own: #F5F2EE paper, #8B1A1A oxblood, Fraunces/Inter/
+  JetBrains Mono; issue colours from the dispatcher app, truck-state colours
+  from skl-route-agent's dashboard STATE_COLOR.
+-->
 <style>
-  /*
-    PT SKL brand system, matching skl-route-agent/dashboard.html
-    (the live dispatcher dashboard) exactly -- confirmed as the real,
-    already-shipped system rather than invented for this page (direct
-    instruction, 2026-08-27: "the design of the miniapp needs work" ->
-    match the dashboard). Fixed light theme only, no dark-mode variant --
-    the dashboard has none either, so Telegram's own --tg-theme-* vars
-    are deliberately NOT used here anymore; this app should look like
-    SKL's own tool, not adapt to whatever theme the chat happens to be in.
-  */
-  :root {
-    --bg: #F5F2EE; --surface: #FFFFFF; --surface2: #F0EBE4; --surface3: #E5DDD3;
-    --border: #E2D9CC; --accent: #8B1A1A; --accent-hover: #6E1414; --accent-dim: #F3E3E3;
-    --text: #2B2420; --muted: #7A6F63; --dim: #B0A594;
-    --green: #1E8449; --red: #B91C1C;
-    --mono: 'JetBrains Mono', monospace; --sans: 'Inter', sans-serif; --display: 'Fraunces', serif;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; padding: 16px 16px 32px;
-    background: var(--bg); color: var(--text);
-    font-family: var(--sans);
-    font-size: 15px; line-height: 1.5;
-  }
-  h1 {
-    font-family: var(--display); font-size: 22px; font-weight: 600; color: var(--accent);
-    margin: 4px 0 2px;
-  }
-  .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 18px; }
-  .fm-hint { color: var(--muted); font-size: 12px; margin-top: 4px; min-height: 16px; }
-  .tabs { display: flex; gap: 4px; margin-bottom: 20px; border-bottom: 1px solid var(--border); }
-  .tab {
-    flex: 1; text-align: center; padding: 10px 4px; font-size: 13px; font-weight: 600;
-    color: var(--muted); border-bottom: 2px solid transparent; cursor: pointer; white-space: nowrap;
-  }
-  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
-  .screen { display: none; }
-  .screen.active { display: block; }
-  label { display: block; font-size: 13px; color: var(--muted); margin: 16px 0 6px; }
-  select, input, textarea {
-    width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border);
-    background: var(--surface); color: var(--text); font-size: 15px; font-family: inherit;
-  }
-  select:focus, input:focus, textarea:focus { outline: none; border-color: var(--accent); }
-  textarea { resize: vertical; min-height: 60px; }
-  button.primary {
-    width: 100%; margin-top: 22px; padding: 13px; border: none; border-radius: 8px;
-    background: var(--accent); color: #fff; font-size: 15px; font-weight: 600;
-    cursor: pointer; transition: background 0.15s;
-  }
-  button.primary:hover { background: var(--accent-hover); }
-  button.primary:disabled { opacity: 0.5; }
-  .card {
-    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
-    padding: 14px 16px; margin-bottom: 12px;
-  }
-  /* repair-card is the collapsible list version of .card, used on the
-     Diperbaiki screen (direct feedback, 2026-08-29: "can the list of
-     repairs being done be in a list form that can expand into the cards
-     rather than the whole card showing outright") -- same visual shell,
-     but the summary line is the always-visible compact row and
-     repair-body only renders once expanded. */
-  .repair-card {
-    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
-    margin-bottom: 12px; overflow: hidden;
-  }
-  .repair-summary {
-    display: flex; align-items: center; justify-content: space-between; gap: 10px;
-    padding: 14px 16px; cursor: pointer; list-style: none;
-  }
-  .repair-summary::-webkit-details-marker { display: none; }
-  .repair-summary::after {
-    content: "\25B8"; color: var(--muted); font-size: 12px; flex-shrink: 0;
-    transition: transform 0.15s;
-  }
-  .repair-card[open] .repair-summary::after { transform: rotate(90deg); }
-  .repair-summary .truck-id { font-family: var(--mono); color: var(--accent); font-weight: 600; }
-  .repair-summary-meta {
-    font-size: 13px; color: var(--muted); text-align: right; overflow: hidden;
-    text-overflow: ellipsis; white-space: nowrap;
-  }
-  .repair-body { padding: 0 16px 14px; }
-  .card-title { font-weight: 600; margin-bottom: 2px; }
-  .card-title .truck-id { font-family: var(--mono); color: var(--accent); }
-  .card-meta { font-size: 13px; color: var(--muted); line-height: 1.5; }
-  .card button, .repair-body button {
-    margin-top: 12px; width: 100%; padding: 9px; border: 1px solid var(--accent);
-    border-radius: 8px; background: var(--accent-dim); color: var(--accent);
-    font-size: 14px; font-weight: 600; cursor: pointer;
-  }
-  .empty { color: var(--dim); text-align: center; padding: 32px 0; font-size: 14px; }
-  /* Every distinct block inside a card (location, issues, add-issue,
-     total) shares the same top rule + gap, so the card reads as evenly
-     spaced sections instead of the parts nearest each other looking
-     cramped and the parts near a dashed divider looking loose. */
-  .card-section {
-    margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border);
-  }
-  .issue-row { padding: 6px 0; font-size: 14px; }
-  details.add-issue summary {
-    color: var(--accent); font-size: 13px; font-weight: 600; cursor: pointer; list-style: none;
-  }
-  details.add-issue summary::-webkit-details-marker { display: none; }
-  details.add-issue[open] summary { margin-bottom: 4px; }
-  .issue-edit summary { cursor: pointer; list-style: none; }
-  .issue-edit summary::-webkit-details-marker { display: none; }
-  .issue-edit[open] summary { color: var(--accent); }
-  .issue-edit-actions { display: flex; gap: 8px; margin-top: 10px; }
-  .issue-edit-actions button { margin-top: 0; flex: 1; }
-  /* Wraps each issue's (.issue-edit details + .issue-actions) pair so
-     consecutive masalah read as visually separate blocks -- direct
-     feedback, 2026-08-30: "not enough white space" between them once
-     both are expanded (before this, nothing but the details element's
-     own tiny margins separated one masalah from the next). */
-  .issue-unit { padding: 10px 0; border-top: 1px solid var(--border); }
-  .issue-unit:first-child { border-top: none; padding-top: 0; }
-  .card button.btn-danger, .repair-body button.btn-danger {
-    border-color: var(--red); color: var(--red); background: transparent;
-  }
-  .card-total { font-size: 13px; color: var(--muted); }
-  .toast {
-    position: fixed; left: 16px; right: 16px; bottom: 16px; padding: 12px 16px;
-    border-radius: 8px; background: var(--text); color: var(--bg); font-size: 14px;
-    text-align: center; display: none; z-index: 10;
-  }
-  .not-telegram { text-align: center; padding: 60px 20px; color: var(--muted); }
-  /* Per-issue lifecycle badge + actions (2026-08-30: request_parts/
-     mark_issue_done) -- lives as a sibling block right after each
-     .issue-edit <details>, not inside it, since an <input>/<button>
-     inside a <summary> would fight the details/summary's own click
-     toggle. */
-  .issue-status-badge { display: inline-block; font-size: 11px; font-weight: 500; color: var(--muted); background: var(--surface2); border-radius: 10px; padding: 2px 8px; margin-left: 6px; vertical-align: middle; }
-  .issue-actions { padding: 6px 0 10px; }
-  .issue-vendor-note { font-size: 12.5px; color: var(--muted); }
-  .issue-actions label { margin: 6px 0 4px; }
-  .issue-actions button { margin-top: 8px; }
-  .btn-request-parts { width: 100%; margin-top: 14px; padding: 12px; border: none; border-radius: 8px; background: var(--accent); color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; }
-  .btn-request-parts:disabled { opacity: 0.5; }
-  .btn-done-disabled { width: 100%; margin-top: 12px; padding: 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface2); color: var(--dim); font-size: 13px; text-align: center; }
-  .photo-row { display: flex; align-items: center; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
-  .photo-btn { padding: 9px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface2); color: var(--text); font-size: 13px; font-weight: 600; cursor: pointer; text-align: center; }
-  .photo-btn input { display: none; }
-  .photo-count { font-size: 12px; color: var(--muted); }
+:root {
+  --bg: #F5F2EE; --surface: #FFFFFF; --surface2: #F0EBE4; --surface3: #E5DDD3;
+  --text: #2B2420; --muted: #7A6F63; --dim: #B0A594; --border: #E2D9CC;
+  --accent: #8B1A1A; --accent-hover: #6E1414; --accent-dim: #F3E3E3;
+  --green: #1E8449; --green-dim: #E1F0E6; --amber: #9A5B0A; --amber-dim: #FCEFD8; --red: #B91C1C;
+  --display: 'Fraunces', Georgia, serif; --sans: 'Inter', system-ui, sans-serif; --mono: 'JetBrains Mono', ui-monospace, monospace;
+  --r: 14px; --tap: 52px;
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 16px; -webkit-font-smoothing: antialiased; }
+body { min-height: 100vh; overscroll-behavior-y: none; }
+button, input, textarea, select { font: inherit; color: inherit; }
+button { cursor: pointer; border: 0; background: none; padding: 0; }
+button:disabled { opacity: .45; cursor: default; }
+a { color: var(--accent); }
+.mono { font-family: var(--mono); }
+.hidden { display: none !important; }
 
-  /* Truck diagram picker (Lapor Baru) -- see DIAGRAM_SCREENS in the
-     script below. */
-  #diagram-picker {
-    border: 1px solid var(--border); border-radius: 10px; background: var(--surface);
-    padding: 10px; margin-bottom: 4px;
-  }
-  .diagram-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-  .diagram-title { font-size: 13px; font-weight: 600; color: var(--text); }
-  .diagram-back {
-    border: none; background: none; color: var(--accent); font-size: 13px; font-weight: 600;
-    cursor: pointer; padding: 2px 0;
-  }
-  .diagram-imgwrap { position: relative; width: 100%; border-radius: 8px; overflow: hidden; background: var(--surface2); }
-  .diagram-imgwrap img { display: block; width: 100%; height: auto; }
-  .diagram-dots { position: absolute; inset: 0; }
-  /* Text-on-dot, not a bare circle -- there's no hover on a phone to
-     reveal a caption the way the desktop dashboard's dots do, so the
-     label has to be readable directly. */
-  .diagram-dot {
-    position: absolute; transform: translate(-50%, -50%);
-    min-width: 22px; padding: 3px 7px; border: 2px solid #fff; border-radius: 999px;
-    background: var(--accent); color: #fff; font-size: 11px; font-weight: 700;
-    line-height: 1.2; text-align: center; cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,0.35);
-    white-space: nowrap;
-  }
-  .diagram-altgo, .diagram-skip, .diagram-change, #diagram-resume-btn {
-    border: none; background: none; color: var(--accent); font-size: 12.5px; font-weight: 600;
-    cursor: pointer; padding: 8px 0 2px; text-align: left; display: block;
-  }
-  .diagram-menu { display: flex; flex-direction: column; gap: 8px; }
-  .diagram-menu-btn {
-    padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface2);
-    color: var(--text); font-size: 14px; text-align: left; cursor: pointer;
-  }
-  #diagram-summary {
-    display: flex; align-items: center; justify-content: space-between; gap: 8px;
-    border: 1px solid var(--border); border-radius: 10px; background: var(--accent-dim);
-    padding: 10px 12px; margin-bottom: 4px; font-size: 13.5px; font-weight: 600; color: var(--accent);
-  }
-  #diagram-summary .diagram-change { padding: 0; }
+/* ---------- shared pieces ---------- */
+.large-title { font-family: var(--display); font-weight: 600; letter-spacing: -0.01em; font-size: 34px; line-height: 1.1; margin: 0; }
+.eyebrow { font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 0 4px; }
+.sub { font-size: 14px; color: var(--muted); }
+.group { background: var(--surface); border-radius: var(--r); overflow: hidden; }
+.row { display: flex; align-items: center; gap: 12px; min-height: 64px; padding: 10px 16px; width: 100%; text-align: left; background: var(--surface); position: relative; }
+.row + .row::before { content: ""; position: absolute; top: 0; left: 16px; right: 0; height: 1px; background: var(--border); }
+.row.indent + .row.indent::before { left: 70px; }
+.row.selected { background: var(--accent-dim); }
+.row .grow { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.row .title { font-size: 16px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.row .meta { font-size: 13px; color: var(--muted); }
+.truck-num { font-family: var(--display); font-weight: 600; font-size: 26px; width: 44px; flex-shrink: 0; }
+.chev { width: 9px; height: 16px; flex-shrink: 0; }
+.pill { display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 10px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.st-neutral { background: var(--surface2); color: var(--muted); }
+.st-amber { background: var(--amber-dim); color: var(--amber); }
+.st-work { background: var(--accent-dim); color: var(--accent); }
+.st-done { background: var(--green-dim); color: var(--green); }
+.dot { width: 10px; height: 10px; border-radius: 5px; flex-shrink: 0; }
+.btn { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: var(--tap); padding: 0 20px; border-radius: var(--r); font-size: 17px; font-weight: 600; text-decoration: none; }
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-primary:active { background: var(--accent-hover); }
+.btn-green { background: var(--green); color: #fff; }
+.btn-dark { background: var(--text); color: #fff; }
+.btn-soft { background: var(--surface2); color: var(--text); }
+.btn-plain { background: var(--surface); color: var(--accent); }
+.btn-block { width: 100%; }
+.seg { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); padding: 3px; border-radius: 11px; background: var(--surface3); }
+.seg button { min-height: 40px; border-radius: 9px; font-size: 15px; font-weight: 500; color: var(--muted); padding: 0 8px; }
+.seg button.on { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: 0 1px 3px rgba(43,36,32,.12); }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { min-height: 48px; padding: 0 16px; border-radius: 12px; background: var(--surface); font-size: 16px; font-weight: 600; }
+.chip.on { background: var(--accent); color: #fff; }
+.chip.num { font-family: var(--display); font-size: 22px; min-width: 64px; }
+.empty-note { padding: 24px 16px; text-align: center; color: var(--muted); font-size: 15px; }
+.stack { display: flex; flex-direction: column; gap: 10px; }
+.hint { font-size: 14px; color: var(--muted); line-height: 1.45; }
+textarea.field, input.field { width: 100%; border: 0; border-radius: var(--r); background: var(--surface); padding: 14px 16px; font-size: 16px; min-height: 52px; }
+textarea.field { min-height: 88px; resize: vertical; }
+.suggest { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 12px; background: var(--amber-dim); color: var(--amber); font-size: 14px; }
+.suggest button { margin-left: auto; font-weight: 700; color: var(--amber); min-height: 40px; padding: 0 8px; }
 
-  /* Report-kind fork (Ada Masalah vs Servis Rutin) -- the very first
-     choice on Lapor Baru, see the HTML comment above it. */
-  .report-kind-fork { display: flex; flex-direction: column; gap: 10px; margin-bottom: 4px; }
-  .report-kind-btn {
-    padding: 18px 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface);
-    color: var(--text); font-size: 16px; font-weight: 600; text-align: left; cursor: pointer;
-  }
-  .report-kind-btn:active { background: var(--accent-dim); border-color: var(--accent); }
-  #r-quantity-row { display: none; }
-  #r-quantity-row.visible { display: block; }
+/* ---------- app shell ---------- */
+#app { min-height: 100vh; display: flex; flex-direction: column; }
+.topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 20px 8px; }
+.me-chip { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 14px 0 6px; border-radius: 24px; background: var(--surface); font-size: 15px; font-weight: 600; }
+.avatar { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 18px; background: var(--accent); color: #fff; font-family: var(--display); font-weight: 600; }
+.avatar.alt { background: var(--surface3); color: var(--text); }
+.split { flex: 1; display: grid; grid-template-columns: 400px minmax(0, 1fr); min-height: 0; }
+.side { background: var(--surface2); border-right: 1px solid var(--border); display: flex; flex-direction: column; gap: 14px; padding: 20px 16px 24px; overflow-y: auto; height: 100vh; position: sticky; top: 0; }
+.main { padding: 20px 32px 32px; display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.narrow-body { flex: 1; padding: 8px 16px 110px; display: flex; flex-direction: column; gap: 14px; }
+.tabbar { position: fixed; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(3, 1fr); background: rgba(255,255,255,.96); backdrop-filter: blur(12px); border-top: 1px solid var(--border); padding-bottom: env(safe-area-inset-bottom); z-index: 20; }
+.tabbar button { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 10px 0 12px; font-size: 12px; font-weight: 600; color: var(--muted); position: relative; }
+.tabbar button.on { color: var(--accent); }
+.badge { position: absolute; top: 4px; left: calc(50% + 6px); min-width: 20px; height: 20px; border-radius: 10px; background: var(--accent); color: #fff; font-size: 12px; display: flex; align-items: center; justify-content: center; padding: 0 6px; }
+.navback { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; font-size: 17px; color: var(--accent); }
+.normal-list { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border-radius: var(--r); background: var(--surface); font-size: 15px; }
+.normal-list span { display: flex; align-items: center; gap: 10px; }
+.normal-list b { width: 34px; }
 
-  /* Direct instruction, 2026-09-14: the pool tablet is a shared kiosk
-     device (bigger screen, mounted, used standing up), not another
-     phone -- at that width the diagram deserves real space instead of
-     being squeezed into the same ~340px column a phone gets. Grid
-     auto-placement (row-flow) packs each explicitly-columned item into
-     the next open row of ITS column in document order, so the two
-     "lists" (diagram-side, field-side) each stack correctly without
-     needing an explicit row count. Below 900px this rule doesn't apply
-     at all -- .lapor-grid is inert, phones get the exact block-stacked
-     layout they always have. 900px chosen to clear an 800px-wide
-     portrait tablet with margin, and comfortably fit typical 10-11"
-     landscape tablets like the pool's.
-  */
-  @media (min-width: 900px) {
-    .lapor-grid { display: grid; grid-template-columns: 1fr 340px; column-gap: 28px; align-items: start; }
-    .lbl-bagian, #diagram-picker, #diagram-summary, #diagram-skip-note, #diagram-routine-panel { grid-column: 1; }
-    .lbl-truck, #f-truck, .lbl-lokasi, #f-location,
-    .lbl-jenis, #f-failure-mode, #f-fm-hint,
-    .lbl-deskripsi, #f-description, #btn-create { grid-column: 2; }
-    /* No height cap on the diagram image on purpose: .diagram-imgwrap
-       img is width:100%/height:auto and .diagram-dots' hotspot
-       positions are percentages of that same wrapper -- capping height
-       here would shrink the image narrower than its 100%-wide wrapper
-       (per replaced-element sizing) while the wrapper itself stayed
-       full width, throwing every hotspot off the actual pixels of a
-       now-smaller, left-aligned image. Column 1 simply being wider than
-       the phone's ~340px is already the win; let width:100% do its job. */
-  }
+/* ---------- truck detail ---------- */
+.detail-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.issue-card { background: var(--surface); border-radius: 16px; padding: 18px; display: flex; flex-direction: column; gap: 12px; }
+.issue-card.work { box-shadow: inset 0 0 0 2px var(--accent); }
+.issue-card.pending { opacity: .6; }
+.issue-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.issue-title { font-family: var(--display); font-size: 24px; font-weight: 600; line-height: 1.2; margin: 0; }
+.issue-desc { font-size: 15px; color: var(--muted); line-height: 1.45; }
+.issue-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.issue-actions .btn-primary, .issue-actions .btn-green, .issue-actions .full { grid-column: 1 / -1; min-height: 60px; font-size: 18px; }
+.linkbtn { color: var(--accent); font-size: 15px; font-weight: 600; min-height: 40px; }
+.repair-foot { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 14px 16px; border-radius: 16px; background: var(--surface); }
+.repair-foot .hint { flex: 1; min-width: 200px; }
+.two-col { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+
+/* ---------- sheets ---------- */
+.sheet-backdrop { position: fixed; inset: 0; background: rgba(43,36,32,.38); z-index: 40; display: flex; align-items: flex-end; justify-content: center; }
+.sheet-backdrop.anim { animation: fade .18s ease; }
+.sheet { width: min(1180px, 100%); height: calc(100% - 28px); background: var(--bg); border-radius: 22px 22px 0 0; display: flex; flex-direction: column; overflow: hidden; }
+.sheet-backdrop.anim .sheet { animation: up .22s cubic-bezier(.2,.8,.2,1); }
+.sheet-head { display: grid; grid-template-columns: 110px minmax(0, 1fr) 110px; align-items: center; min-height: 60px; padding: 0 18px; background: var(--surface); border-bottom: 1px solid var(--border); }
+.sheet-head .t { text-align: center; font-size: 17px; font-weight: 600; }
+.sheet-head button { justify-self: start; color: var(--accent); font-size: 17px; min-height: 44px; }
+.sheet-body { flex: 1; overflow-y: auto; padding: 18px 20px 24px; }
+.sheet-foot { padding: 12px 20px calc(16px + env(safe-area-inset-bottom)); background: var(--surface); border-top: 1px solid var(--border); display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.sheet-foot .summary { flex: 1; min-width: 200px; font-size: 15px; color: var(--muted); }
+.sheet-foot .summary b { color: var(--text); }
+@keyframes up { from { transform: translateY(40px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+.lapor-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 22px; align-items: start; }
+
+/* ---------- photo picker ---------- */
+.crumbs { display: flex; align-items: center; gap: 8px; font-size: 15px; flex-wrap: wrap; min-height: 32px; }
+.crumbs button { color: var(--accent); font-weight: 600; min-height: 32px; }
+.crumbs .sep { color: var(--dim); }
+.photo { position: relative; width: 100%; border-radius: 16px; overflow: hidden; background: var(--surface); }
+.photo img { display: block; width: 100%; height: auto; user-select: none; -webkit-user-drag: none; }
+.spot { position: absolute; transform: translate(-50%, -50%); display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 12px; border-radius: 20px; background: rgba(255,255,255,.95); box-shadow: 0 2px 8px rgba(43,36,32,.28); font-size: 14px; font-weight: 600; white-space: nowrap; }
+.spot.zone { min-height: 44px; font-size: 15px; }
+.spot.open { background: var(--accent); color: #fff; }
+.spot.sel { outline: 3px solid var(--text); outline-offset: 1px; }
+.spot .n { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px; border-radius: 11px; background: #fff; color: var(--accent); font-size: 12px; font-weight: 700; }
+.thumbs { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(112px, 1fr); gap: 8px; overflow-x: auto; padding-bottom: 2px; }
+.thumb { display: flex; flex-direction: column; gap: 5px; padding: 5px; border-radius: 12px; background: var(--surface); text-align: left; }
+.thumb img { width: 100%; height: 58px; object-fit: cover; border-radius: 8px; display: block; }
+.thumb span { font-size: 13px; font-weight: 600; padding: 0 3px 2px; }
+.thumb.on { box-shadow: inset 0 0 0 2px var(--accent); background: var(--accent-dim); color: var(--accent); }
+.pop { position: absolute; z-index: 5; width: min(320px, 92%); left: 50%; top: 50%; transform: translate(-50%, -50%); background: var(--surface); border-radius: 18px; padding: 14px; box-shadow: 0 14px 36px rgba(43,36,32,.32); display: flex; flex-direction: column; gap: 8px; }
+.pop .h { display: flex; align-items: center; justify-content: space-between; font-size: 16px; font-weight: 600; }
+.pop .choice { min-height: 54px; padding: 0 16px; border-radius: 12px; background: var(--surface2); font-size: 16px; font-weight: 600; text-align: left; }
+
+/* ---------- lock ---------- */
+.lock { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); min-height: 100vh; }
+.lock-left { display: flex; flex-direction: column; justify-content: center; gap: 30px; padding: 56px; }
+.lock-right { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 28px; padding: 40px; background: var(--surface); }
+.pin-dots { display: flex; gap: 22px; }
+.pin-dots span { width: 18px; height: 18px; border-radius: 9px; border: 2px solid var(--dim); }
+.pin-dots span.f { background: var(--text); border-color: var(--text); }
+.pin-dots.shake { animation: shake .35s; }
+@keyframes shake { 20%, 60% { transform: translateX(-10px); } 40%, 80% { transform: translateX(10px); } }
+.pad { display: grid; grid-template-columns: repeat(3, 88px); gap: 16px 26px; }
+.pad button { width: 88px; height: 88px; border-radius: 44px; background: var(--surface2); font-size: 34px; font-weight: 500; }
+.pad button:active { background: var(--surface3); }
+.pad .txt { background: transparent; font-size: 17px; font-weight: 600; color: var(--accent); }
+
+/* ---------- toast ---------- */
+#toast { position: fixed; left: 50%; bottom: calc(96px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 60; display: none; align-items: center; gap: 16px; max-width: calc(100% - 32px); padding: 12px 12px 12px 18px; border-radius: 14px; background: var(--text); color: #fff; font-size: 15px; box-shadow: 0 10px 30px rgba(43,36,32,.3); }
+#toast.show { display: flex; }
+#toast button { color: #F0B8B8; font-weight: 700; min-height: 40px; padding: 0 10px; }
+
+/* ---------- narrow screens (phone, tablet portrait) ---------- */
+@media (max-width: 899px) {
+  .split { display: block; }
+  .lock { grid-template-columns: 1fr; }
+  .lock-left { padding: 32px 20px 8px; gap: 20px; }
+  .lock-right { background: transparent; padding: 16px 20px 40px; }
+  .pad { grid-template-columns: repeat(3, 76px); gap: 14px 22px; }
+  .pad button { width: 76px; height: 76px; border-radius: 38px; font-size: 30px; }
+  .lapor-grid, .two-col { grid-template-columns: 1fr; }
+  .sheet { height: calc(100% - 12px); border-radius: 16px 16px 0 0; }
+  .sheet-body { padding: 14px 16px 20px; }
+  .issue-title { font-size: 21px; }
+  .large-title { font-size: 30px; }
+  .spot { min-height: 34px; padding: 0 9px; font-size: 12px; }
+  .spot.zone { min-height: 36px; font-size: 13px; }
+  /* The photo is ~200px tall on a phone -- the brake/wheel choice opens as a bottom sheet instead of over it. */
+  .pop { position: fixed; left: 0; right: 0; top: auto; bottom: 0; transform: none; width: 100%; border-radius: 18px 18px 0 0; padding: 16px 16px calc(20px + env(safe-area-inset-bottom)); z-index: 50; }
+  #toast { bottom: calc(86px + env(safe-area-inset-bottom)); }
+}
+@media (min-width: 900px) {
+  .tabbar { display: none; }
+  #toast { bottom: 28px; }
+}
 </style>
 </head>
 <body>
-
-<div id="notTelegram" class="not-telegram" style="display:none">
-  Buka formulir ini dari tombol "🔧 Buka Formulir Servis" di chat bot SKL Lapangan, bukan dari browser langsung.
-</div>
-
-<div id="app" style="display:none">
-  <h1>Formulir Servis</h1>
-  <div class="subtitle" id="mechanicName"></div>
-
-  <div class="tabs">
-    <div class="tab active" data-screen="new">Lapor Baru</div>
-    <div class="tab" data-screen="done">Diperbaiki</div>
-    <div class="tab" data-screen="signoff">Sign-off</div>
-  </div>
-
-  <div class="screen active" id="screen-new">
-    <!--
-      Direct instruction, 2026-09-12: routine service (oil/filter/brake-
-      fluid changes, tarp) was only ever logged through the failure-mode
-      picker below because this app had no other door into it -- a
-      category error (answers "what work was done", not "what's wrong")
-      that poisons any later failure-rate analysis. This fork asks which
-      question a mechanic is actually answering BEFORE anything else,
-      since they already know which one it is the moment they open the
-      app -- "something broke" and "I'm doing scheduled service" are two
-      completely different mental modes, not a detail to infer afterward.
-    -->
-    <div class="report-kind-fork" id="report-kind-fork">
-      <button type="button" class="report-kind-btn" id="btn-kind-masalah">🔧 Ada Masalah/Kerusakan</button>
-      <button type="button" class="report-kind-btn" id="btn-kind-rutin">🛠️ Servis Rutin</button>
-    </div>
-
-    <div id="new-masalah-form" style="display:none">
-    <button type="button" class="diagram-change" id="btn-kind-back-1" style="margin:0 0 8px">&larr; Ganti jenis laporan</button>
-    <!--
-      Direct instruction, 2026-09-14: a shared tablet mounted at the pool
-      needs this screen to actually use its width -- the layout below is
-      still mobile-first (a plain block stack, unchanged at narrow
-      widths), but wrapping it in .lapor-grid lets the >=900px rule
-      further down reflow it into two columns (diagram gets real estate,
-      fields sit alongside) without moving a single element out of its
-      original document order or touching any id/JS. #new-masalah-form
-      itself can't carry the grid directly -- its show/hide is an inline
-      style.display toggle in JS, which would always beat a stylesheet
-      rule regardless of media query.
-    -->
-    <div class="lapor-grid">
-    <label class="lbl-truck">Truk</label>
-    <select id="f-truck"></select>
-    <label class="lbl-lokasi">Lokasi</label>
-    <select id="f-location">
-      <option value="pool">Pool</option>
-      <option value="storing_luar">Storing luar</option>
-      <option value="bengkel_luar">Bengkel luar</option>
-    </select>
-
-    <label class="lbl-bagian">Di bagian mana?</label>
-    <!--
-      Direct instruction, 2026-09-12: let a mechanic tap the truck itself
-      to say WHERE the problem is, instead of typing/picking a position
-      that a director then has to fix after the fact -- all the hotspot
-      grid-verification work in skl-route-agent/dashboard.html was only
-      paying off for someone reviewing history at a desk, never at the
-      moment a report is actually created. See DIAGRAM_SCREENS in the
-      script below for the data (ported from that dashboard, same
-      source of truth).
-    -->
-    <div id="diagram-picker">
-      <div class="diagram-header">
-        <button type="button" id="diagram-back" class="diagram-back" style="display:none">&larr; Kembali</button>
-        <span id="diagram-title" class="diagram-title"></span>
-      </div>
-      <div id="diagram-body"></div>
-      <button type="button" id="diagram-skip-btn" class="diagram-skip">Tidak ada di gambar / Lainnya</button>
-    </div>
-    <div id="diagram-summary" style="display:none">
-      <span id="diagram-result-text"></span>
-      <button type="button" id="diagram-change-btn" class="diagram-change">Ubah</button>
-    </div>
-    <div id="diagram-skip-note" class="fm-hint" style="display:none">
-      Posisi dilewati -- pilih Jenis kerusakan langsung dari daftar di bawah.
-      <button type="button" id="diagram-resume-btn" class="diagram-change">Coba lagi dari gambar</button>
-    </div>
-
-    <!--
-      Direct instruction, 2026-09-12: Filter oli/Filter solar are routine
-      service items, not failures -- tapping their dot shouldn't drop a
-      mechanic into the failure-mode picker at all. Shows last-serviced
-      history instead, with a shortcut straight into the Servis Rutin
-      form (pre-filled) if they want to log a new one from here.
-    -->
-    <div id="diagram-routine-panel" style="display:none">
-      <div id="diagram-routine-title" class="diagram-title"></div>
-      <div id="diagram-routine-history" class="fm-hint"></div>
-      <button type="button" id="diagram-routine-back-btn" class="diagram-change">&larr; Kembali ke gambar</button>
-      <button type="button" id="diagram-routine-log-btn" class="primary" style="margin-top:10px">+ Catat Servis Rutin</button>
-    </div>
-
-    <label class="lbl-jenis">Jenis kerusakan</label>
-    <select id="f-failure-mode"></select>
-    <div class="fm-hint" id="f-fm-hint"></div>
-    <label class="lbl-deskripsi">Deskripsi</label>
-    <textarea id="f-description" placeholder="Jelaskan kerusakan yang ditemukan... (mis. &quot;rem blong&quot;)"></textarea>
-    <button class="primary" id="btn-create">Simpan Laporan</button>
-    </div>
-    </div>
-
-    <div id="new-rutin-form" style="display:none">
-      <button type="button" class="diagram-change" id="btn-kind-back-2" style="margin:0 0 8px">&larr; Ganti jenis laporan</button>
-      <label>Truk</label>
-      <select id="r-truck"></select>
-      <label>Item</label>
-      <select id="r-item-type"></select>
-      <label>Tanggal</label>
-      <input type="date" id="r-performed-at" />
-      <!-- Quantity only makes sense for the two fluids -- toggled by
-           r-item-type's own change handler, see updateQuantityRowVisibility
-           below. Label text (liter vs ml) also comes from ROUTINE_ITEMS,
-           not hardcoded -- oli mesin and minyak rem are measured in very
-           different quantities. -->
-      <div id="r-quantity-row">
-        <label id="r-quantity-label">Jumlah (opsional)</label>
-        <input type="number" id="r-quantity" step="0.1" min="0" placeholder="mis. 8" />
-      </div>
-      <label>Catatan (opsional)</label>
-      <textarea id="r-notes" placeholder="mis. merk oli, kondisi terpal, dll."></textarea>
-      <button class="primary" id="btn-create-rutin">Simpan Servis Rutin</button>
-    </div>
-  </div>
-
-  <div class="screen" id="screen-done">
-    <div id="list-open" class="empty">Memuat...</div>
-  </div>
-
-  <div class="screen" id="screen-signoff">
-    <div id="list-signoff" class="empty">Memuat...</div>
-  </div>
-</div>
-
-<div class="toast" id="toast"></div>
+<div id="app"></div>
+<div id="sheet-root"></div>
+<div id="toast" role="status" aria-live="polite"><span id="toast-msg"></span><button id="toast-undo" class="hidden">Batalkan</button></div>
+<input type="file" id="photo-input" accept="image/*,video/*" capture="environment" class="hidden">
 
 <script>
+"use strict";
+// Production only, deliberately: no ?api= override. The tablet holds a device
+// key and receives PINs, so a crafted link pointing the page at another
+// server would hand both over.
 const API_URL = "https://kcftvbuwotjjroattdak.supabase.co/functions/v1/mekanik-api";
-const tg = window.Telegram && window.Telegram.WebApp;
+const IMG = "https://skl-ops.ptmercusuar.com/static/truck-diagram/";
+const IMG_V = "8";
+const img = (f) => IMG + f + "?v=" + IMG_V;
+const tg = window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData ? window.Telegram.WebApp : null;
+const DEMO = location.hash === "#demo";
+const LOCK_AFTER_MS = 2 * 60 * 1000;
+const UNDO_MS = 10 * 1000;
+const DEVICE_KEY_STORE = "skl_mekanik_device_key";
 
-let catalogs = { failureModes: [], vendors: [], trucks: [] };
-
-const LOCATION_LABELS = { pool: "Pool", storing_luar: "Storing luar", bengkel_luar: "Bengkel luar" };
-
-// repair_record_issues.status labels -- mirrors mekanik-api's own
-// ISSUE_STATUS_LABELS_ID and skl-route-agent dashboard.html's
-// ISSUE_STATUS_LABELS (hand-kept in sync across the 3 codebases, same as
-// LOCATION_LABELS already is between this file and mekanik-api).
-const ISSUE_STATUS_LABELS = {
-  reported: "Dilaporkan", diagnosed: "Terdiagnosis",
-  request_for_parts: "Minta suku cadang", vendor_selected: "Vendor dipilih",
-  in_progress: "Sedang diperbaiki", done: "Selesai", verified: "Terverifikasi",
-};
-
-function failureModeOptions(selected) {
-  return catalogs.failureModes
-    .map((f) => `<option value="${f.id}" ${f.id === selected ? "selected" : ""}>${f.name}</option>`)
-    .join("");
-}
-
-// Direct instruction, 2026-09-12: Ganti filter oli/Ganti filter solar/
-// Ganti minyak rem now have a real home (Servis Rutin) -- they answer
-// "what work was done", not "what's wrong", and mixing them into a
-// failure report poisons any later failure-rate analysis. Excluded
-// from every picker where a mechanic logs a NEW problem (Lapor Baru,
-// + Tambah masalah). Deliberately NOT filtered out of
-// failureModeOptions() above -- an OLD issue logged under one of these
-// before Servis Rutin existed must stay editable/viewable as-is, not
-// silently lose its own value out of the edit dropdown.
+// ---------- labels (kept in step with mekanik-api / dashboard / dispatcher) ----------
+const LOCATION_LABELS = { pool: "Pool", storing_luar: "Storing", bengkel_luar: "Bengkel luar" };
+const STATE_LABELS = { IN_TRANSIT: "Transit", UNLOADING: "Bongkar", LOADING: "Muat", QUEUING_PICKUP: "Muat", DECIDING: "Pilih rute", FERRY: "Ferry", WAITING_YARD: "Di Pool", IDLE_UNKNOWN: "Idle", UNDER_REPAIR: "Perbaikan", POSITIONING: "Positioning" };
+const STATE_COLOR = { IN_TRANSIT: "#22C55E", LOADING: "#3B82F6", UNLOADING: "#3B82F6", QUEUING_PICKUP: "#3B82F6", DECIDING: "#D97706", FERRY: "#a78bfa", WAITING_YARD: "#0D9488", IDLE_UNKNOWN: "#4A5568", UNDER_REPAIR: "#EF4444", POSITIONING: "#22C55E" };
 const ROUTINE_FM_NAMES = ["Ganti filter oli", "Ganti filter solar", "Ganti oli mesin", "Ganti minyak rem"];
-function newIssueFailureModes() {
-  return catalogs.failureModes.filter((f) => !ROUTINE_FM_NAMES.includes(f.name));
-}
-function newFailureModeOptions() {
-  return newIssueFailureModes().map((f) => `<option value="${f.id}">${f.name}</option>`).join("");
-}
-
-function locationOptions(selected) {
-  return Object.keys(LOCATION_LABELS)
-    .map((k) => `<option value="${k}" ${k === selected ? "selected" : ""}>${LOCATION_LABELS[k]}</option>`)
-    .join("");
-}
-
-function issueRowHtml(issue) {
-  const fm = issue.failure_modes ? issue.failure_modes.name : "(lainnya)";
-  const desc = issue.description ? " -- " + issue.description : "";
-  return `<div class="issue-row">${fm}${desc}</div>`;
-}
-
-// Editable version, used only on the open-repairs ("Diperbaiki") screen
-// -- a mechanic can add a missed detail, fix a wrong failure mode, or
-// remove a misclick, but only while the session is still open (matches
-// mekanik-api's own gate on update_issue/delete_issue). <details> so the
-// default view stays scannable -- same progressive-disclosure pattern as
-// "+ Tambah masalah".
-function editableIssueRowHtml(issue) {
-  const fm = issue.failure_modes ? issue.failure_modes.name : "(lainnya)";
-  const desc = issue.description ? " -- " + issue.description : "";
-  const badge = `<span class="issue-status-badge">${ISSUE_STATUS_LABELS[issue.status] || issue.status}</span>`;
-  return `
-    <details class="issue-edit" data-issue-id="${issue.id}">
-      <summary class="issue-row">${fm}${desc}${badge}</summary>
-      <label>Jenis kerusakan</label>
-      <select class="edit-issue-fm">${failureModeOptions(issue.failure_mode_id)}</select>
-      <label>Deskripsi</label>
-      <textarea class="edit-issue-desc" placeholder="Jelaskan kerusakan yang ditemukan...">${issue.description || ""}</textarea>
-      <div class="issue-edit-actions">
-        <button class="btn-save-issue">Simpan</button>
-        <button class="btn-delete-issue btn-danger">Hapus</button>
-      </div>
-    </details>
-  `;
-}
-
-// Sibling block, NOT inside the <details> above -- an <input>/<button>
-// inside a <summary> fights the details/summary click-to-toggle, so this
-// renders as its own always-visible row right after it instead.
-// 'reported' -> mechanic types what part's needed and submits THIS ONE
-// issue right away (per-issue, not batched -- see btn-request-parts'
-// click handler below for why).
-// 'in_progress' -> mechanic marks this one issue done once physically
-// fixed. Anything else (request_for_parts/vendor_selected/done/verified)
-// is read-only here -- someone else (staff/owner) or the cascade from
-// sign_off owns that transition.
-function issueActionsHtml(issue) {
-  if (issue.status === "reported") {
-    // Per-issue submit (2026-08-30, direct feedback while testing --
-    // previously one bulk button for the whole session, which had a real
-    // bug: leaving a NOT-yet-diagnosed masalah's input blank looked
-    // identical to "genuinely no part needed" and wrongly fast-forwarded
-    // it to in_progress. Each masalah is now its own deliberate decision.
-    return `
-      <div class="issue-actions" data-issue-id="${issue.id}">
-        <label>Suku cadang dibutuhkan (kosongkan jika tidak perlu beli apa-apa)</label>
-        <input type="text" class="issue-parts-needed" placeholder="mis. aki, kampas rem" />
-        <button class="btn-request-parts">Ajukan Permintaan Suku Cadang</button>
-      </div>
-    `;
-  }
-  if (issue.status === "vendor_selected") {
-    // 2026-08-31, direct feedback: "let dispatcher/mechanic be able to
-    // say mulai perbaikan when parts arrive" -- only show the button
-    // once there's actually an approved quote to act on; otherwise a
-    // read-only note (still waiting on the owner, nothing to do yet).
-    const quotes = issue.vendor_quotes || [];
-    const approved = quotes.find((q) => q.is_selected && q.approved_by_owner);
-    if (approved) {
-      return `
-        <div class="issue-actions" data-issue-id="${issue.id}">
-          <div class="issue-vendor-note">Vendor: ${approved.vendor_name} -- sudah disetujui</div>
-          <button class="btn-start-progress">Mulai Perbaikan (Part Sudah Sampai)</button>
-        </div>
-      `;
-    }
-    const selected = quotes.find((q) => q.is_selected);
-    return `
-      <div class="issue-actions" data-issue-id="${issue.id}">
-        <div class="issue-vendor-note">${selected ? "Menunggu persetujuan pemilik: " + selected.vendor_name : "Menunggu staff memilih vendor"}</div>
-      </div>
-    `;
-  }
-  if (issue.status === "in_progress") {
-    return `
-      <div class="issue-actions" data-issue-id="${issue.id}">
-        <button class="btn-issue-done">Tandai Masalah Ini Selesai</button>
-      </div>
-    `;
-  }
-  return "";
-}
-
-// Videos can't go through canvas resize like photos can -- this pipeline
-// sends files as base64 inside one JSON POST, not a streamed/chunked
-// upload, so there's a real practical ceiling. 15MB raw (~20MB once
-// base64-encoded) keeps a single upload well clear of typical edge
-// function payload limits.
-const MAX_VIDEO_BYTES = 15 * 1024 * 1024;
-
-function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error("Gagal membaca file"));
-    reader.onload = () => resolve(reader.result.split(",")[1]);
-    reader.readAsDataURL(file);
-  });
-}
-
-// Downscale a phone-camera photo before it goes into a base64 JSON
-// payload (checklist C2, 2026-08-31) -- draws onto a canvas at reduced
-// size, exports as JPEG, returns just the base64 (no data: URL prefix,
-// mekanik-api decodes it raw).
-function resizeImageToBase64(file, maxDim, quality) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error("Gagal membaca file"));
-    reader.onload = () => {
-      img.onerror = () => reject(new Error("Gagal memuat gambar"));
-      img.onload = () => {
-        let { width, height } = img;
-        if (width > maxDim || height > maxDim) {
-          const scale = maxDim / Math.max(width, height);
-          width = Math.round(width * scale);
-          height = Math.round(height * scale);
-        }
-        const canvas = document.createElement("canvas");
-        canvas.width = width;
-        canvas.height = height;
-        canvas.getContext("2d").drawImage(img, 0, 0, width, height);
-        const dataUrl = canvas.toDataURL("image/jpeg", quality);
-        resolve(dataUrl.split(",")[1]);
-      };
-      img.src = reader.result;
-    };
-    reader.readAsDataURL(file);
-  });
-}
-
-function formatDate(iso) {
-  if (!iso) return "";
-  const d = new Date(iso);
-  return d.toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" })
-    + " " + d.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
-}
-
-function toast(msg) {
-  const t = document.getElementById("toast");
-  t.textContent = msg;
-  t.style.display = "block";
-  setTimeout(() => { t.style.display = "none"; }, 2600);
-}
-
-async function call(action, payload) {
-  const resp = await fetch(API_URL, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ initData: tg.initData, action, payload: payload || {} }),
-  });
-  const body = await resp.json().catch(() => ({}));
-  if (!resp.ok) throw new Error(body.error || ("HTTP " + resp.status));
-  return body;
-}
-
-function setScreen(name) {
-  document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.screen === name));
-  document.querySelectorAll(".screen").forEach((s) => s.classList.toggle("active", s.id === "screen-" + name));
-  if (name === "done") loadOpenRepairs();
-  if (name === "signoff") loadPendingSignoff();
-}
-
-async function loadCatalogs() {
-  const { failureModes, vendors, trucks } = await call("list_catalogs");
-  catalogs = { failureModes: failureModes || [], vendors: vendors || [], trucks: trucks || [] };
-
-  const truckOptionsHtml = catalogs.trucks
-    .map((t) => `<option value="${t.id}">${t.nickname || t.plate || t.id}</option>`)
-    .join("");
-  document.getElementById("f-truck").innerHTML = truckOptionsHtml;
-  document.getElementById("r-truck").innerHTML = truckOptionsHtml;
-
-  document.getElementById("f-failure-mode").innerHTML = newFailureModeOptions();
-}
-
-// ---- Truck diagram picker (Lapor Baru) --------------------------------
-// Direct instruction, 2026-09-12: let a mechanic tap the truck itself to
-// say WHERE the problem is, instead of typing/picking a position that a
-// director then has to fix after the fact -- all the grid-verification
-// work in skl-route-agent/dashboard.html was only paying off for someone
-// reviewing history at a desk, never at the moment a report is actually
-// created. Images load straight from that live dashboard's own static
-// folder rather than being duplicated into this repo, so a future
-// re-compress/replace only has to happen in one place.
-//
-// Data below is PORTED from dashboard.html's TRUCK_DIAGRAM_ZONES/WHEELS
-// and each zone's own detail-picture hotspot arrays -- same source of
-// truth, kept in sync by hand across the two codebases (same convention
-// as LOCATION_LABELS/ISSUE_STATUS_LABELS already are). Scope: covers
-// every zone that has a real close-up photo today; bahan_bakar and bak
-// have no dedicated picture yet (per that repo's own "let go of it for
-// now" note), so tapping those just narrows the Jenis kerusakan list to
-// their category, same as clicking a zone with no drill-down does on
-// the dashboard.
-const DIAGRAM_IMG_BASE = "https://skl-ops.ptmercusuar.com/static/truck-diagram/";
-const DIAGRAM_IMG_V = "8"; // mirrors dashboard.html's TRUCK_DIAGRAM_ASSET_VERSION at time of writing -- bump if that repo replaces a file in place again.
-function dimg(file) { return DIAGRAM_IMG_BASE + file + "?v=" + DIAGRAM_IMG_V; }
-
-// Leaf hotspot: {fm: <exact failure_mode name>, id?, label, left, top}.
-// Matches by exact NAME, not category -- same reason dashboard.html's
-// own nested-reveal dots do: a numbered part can be catalogued under a
-// DIFFERENT category than the picture it visually lives on (e.g.
-// Bearing/laher is 'chassis' but shown on the Rem picture -- not
-// reproduced here, out of scope for this pass, see PR description).
-// `id`, when present, is the SAME coded slot dashboard.html's own
-// hotspot uses (rem-3, per-2, powertrain-gardan-1, ...) -- reused
-// verbatim as this report's component_position so it lines up with the
-// exact dot that would highlight it later.
-//
-// Zone hotspot: {key: <failure_mode category>, label, left, top, go?}.
-// `go` is which screen tapping it opens; with no `go`, it just narrows
-// the Jenis kerusakan list to that category (no picture exists yet).
-const DIAGRAM_SCREENS = {
-  root: {
-    title: "Tampak Samping", src: dimg("truck-side.jpg"), alt: "Tampak samping",
-    zones: [
-      { key: "mesin", label: "Mesin", left: "15%", top: "62%", go: "mesin-menu" },
-      { key: "kelistrikan", label: "Kelistrikan", left: "6.2%", top: "58.3%", go: "kelistrikan" },
-      { key: "chassis", label: "Chassis", left: "55%", top: "67%", go: "chassis-menu" },
-      { key: "bahan_bakar", label: "Tangki BBM", left: "39%", top: "76%" },
-      { key: "kabin", label: "Kabin", left: "16.6%", top: "29.1%", go: "kabin" },
-      { key: "transmisi", label: "Powertrain", left: "45%", top: "68%", go: "powertrain" },
-      { key: "bak", label: "Body", left: "65%", top: "48%" },
-      { key: "ban", label: "Roda", left: "80%", top: "80%", go: "wheels" },
-    ],
-  },
-  wheels: {
-    title: "Tampak Bawah - Roda", src: dimg("truck-underside.jpg"), alt: "Tampak bawah - roda",
-    wheels: [
-      { code: "FL", num: 1, left: "8%", top: "8%" },
-      { code: "FR", num: 2, left: "8%", top: "92%" },
-      { code: "RL1_OUT", num: 3, left: "70%", top: "8%" },
-      { code: "RL1_IN", num: 4, left: "76%", top: "22%" },
-      { code: "RR1_OUT", num: 5, left: "70%", top: "92%" },
-      { code: "RR1_IN", num: 6, left: "76%", top: "78%" },
-      { code: "RL2_OUT", num: 7, left: "90%", top: "8%" },
-      { code: "RL2_IN", num: 8, left: "96%", top: "22%" },
-      { code: "RR2_OUT", num: 9, left: "90%", top: "92%" },
-      { code: "RR2_IN", num: 10, left: "96%", top: "78%" },
-    ],
-    altGo: { label: "Bukan masalah ban? Velg/baud roda →", go: "wheel-rim" },
-  },
-  "wheel-rim": {
-    title: "Detail Velg & Baud Roda", src: dimg("truck-wheel-rim.jpg"), alt: "Detail velg dan baud roda",
-    parts: [
-      { fm: "Velg rusak/penyok", label: "Velg", left: "32%", top: "45%" },
-      { fm: "Baud roda kendor/patah", label: "Baud roda", left: "61%", top: "32%" },
-    ],
-  },
-  powertrain: {
-    title: "Tampak Bawah - Powertrain", src: dimg("truck-underside.jpg"), alt: "Tampak bawah - powertrain",
-    parts: [
-      { fm: "Gearbox/transmisi bermasalah", label: "Transmisi", left: "14%", top: "49%" },
-      { fm: "Kopel/as kopel rusak", id: "powertrain-kopel-1", label: "Kopel 1", left: "45%", top: "50%" },
-      { fm: "As roda/gardan rusak", id: "powertrain-gardan-1", label: "Gardan 1", left: "72%", top: "48%" },
-      { fm: "Kopel/as kopel rusak", id: "powertrain-kopel-2", label: "Kopel 2", left: "79%", top: "49%" },
-      { fm: "As roda/gardan rusak", id: "powertrain-gardan-2", label: "Gardan 2", left: "87%", top: "48%" },
-    ],
-  },
-  "mesin-menu": {
-    title: "Mesin - pilih bagian",
-    menu: [
-      { label: "Mesin (dalam)", go: "mesin" },
-      { label: "Radiator", go: "radiator" },
-      { label: "Bak oli & pompa hidrolik", go: "mesin-oilpan" },
-      { label: "Alternator / starter / filter (luar)", go: "mesin-exterior" },
-    ],
-  },
-  mesin: {
-    title: "Detail Mesin", src: dimg("truck-engine.jpg"), alt: "Detail mesin",
-    parts: [
-      { fm: "Kruk as rusak", label: "Kruk as", left: "50%", top: "88%" },
-      { fm: "Turbo rusak", label: "Turbo", left: "62%", top: "45%" },
-      { fm: "Pompa injeksi/injektor bermasalah", label: "Injektor", left: "78%", top: "15%" },
-      { fm: "Kebocoran oli", label: "Kebocoran oli", left: "35%", top: "85%" },
-      { fm: "Pompa air (water pump) bocor", label: "Pompa air", left: "12%", top: "40%" },
-    ],
-  },
-  radiator: {
-    title: "Detail Radiator", src: dimg("truck-radiator.jpg"), alt: "Detail radiator",
-    parts: [{ fm: "Radiator bocor", label: "Radiator", left: "55%", top: "15%" }],
-  },
-  "mesin-oilpan": {
-    title: "Bak Oli & Pompa Hidrolik", src: dimg("truck-engine-oilpan-hydraulic.jpg"), alt: "Detail bak oli dan pompa hidrolik",
-    parts: [
-      { fm: "Kebocoran oli", label: "Bak oli", left: "42%", top: "48%" },
-      { fm: "Pompa hidrolik bocor/rusak", label: "Pompa hidrolik", left: "61%", top: "48%" },
-    ],
-  },
-  "mesin-exterior": {
-    title: "Mesin Tampak Luar", src: dimg("truck-engine-exterior.jpg"), alt: "Detail mesin tampak luar",
-    parts: [
-      { fm: "Alternator/dinamo rusak", label: "Alternator", left: "49%", top: "34%" },
-      // Direct instruction, 2026-09-12: these two are routine service
-      // items, not failures -- see the diagram-routine-panel HTML
-      // comment and diagramShowRoutineInfo() below. `routine` here is
-      // routine_maintenance_logs.item_type, not a failure_mode name.
-      { routine: "filter_solar", label: "Filter solar", left: "62.9%", top: "49.6%" },
-      // Direct check while building this, 2026-09-12: "filter_oli" was
-      // NOT yet a valid routine_maintenance_logs.item_type (only
-      // filter_solar/oli_mesin/minyak_rem/terpal existed) -- the oil
-      // FILTER and the engine OIL are two different physical items with
-      // different change intervals, so silently reusing "oli_mesin"
-      // here would have conflated them. Added as a real 4th... well,
-      // 5th item_type in the same migration as this dot (see companion
-      // PR), not invented client-side alone.
-      { routine: "filter_oli", label: "Filter oli", left: "58.9%", top: "79.3%" },
-      { fm: "Dinamo starter rusak", label: "Starter", left: "75.5%", top: "64%" },
-    ],
-  },
-  kelistrikan: {
-    title: "Detail Kelistrikan", src: dimg("truck-electrical.jpg"), alt: "Detail kelistrikan",
-    parts: [
-      { fm: "Aki soak", id: "aki-1", label: "Aki 1", left: "26%", top: "23%" },
-      { fm: "Aki soak", id: "aki-2", label: "Aki 2", left: "60%", top: "19%" },
-      { fm: "Kepala aki kendor/korosi", id: "kepala-aki-1", label: "Kepala aki 1", left: "38.59%", top: "30%" },
-      { fm: "Kepala aki kendor/korosi", id: "kepala-aki-2", label: "Kepala aki 2", left: "55.2%", top: "14.1%" },
-      { fm: "Kelistrikan lain", label: "Sekring", left: "71%", top: "48%" },
-    ],
-  },
-  kabin: {
-    title: "Detail Kabin", src: dimg("truck-cabin.jpg"), alt: "Detail kabin",
-    parts: [
-      { fm: "Dashboard/panel rusak", label: "Dashboard", left: "40%", top: "25%" },
-      { fm: "AC tidak dingin", label: "AC", left: "27%", top: "41%" },
-      { fm: "Wiper rusak", label: "Wiper", left: "38.6%", top: "18.9%" },
-      { fm: "Jok/kursi rusak", label: "Jok/kursi", left: "73.6%", top: "45.9%" },
-      { fm: "Kaca pecah/retak", label: "Kaca", left: "10%", top: "13%" },
-    ],
-  },
-  "chassis-menu": {
-    title: "Chassis - pilih bagian",
-    menu: [
-      { label: "Kaki-kaki depan & power steering", go: "chassis-front" },
-      { label: "Per, shockbreaker & rem depan", go: "chassis-leafspring" },
-      { label: "Kaki-kaki belakang", go: "chassis-rear" },
-      { label: "Per & rem - axle tandem 1", go: "chassis-tandem1" },
-      { label: "Per & rem - axle tandem 2", go: "chassis-tandem2" },
-    ],
-  },
-  "chassis-front": {
-    title: "Kaki-kaki Depan", src: dimg("truck-chassis-front.jpg"), alt: "Detail chassis depan",
-    parts: [
-      { fm: "Kaki-kaki/tie rod rusak", id: "kakikaki-1", label: "Kaki-kaki 1", left: "37%", top: "27%" },
-      { fm: "Kaki-kaki/tie rod rusak", id: "kakikaki-2", label: "Kaki-kaki 2", left: "37%", top: "73%" },
-      { fm: "Power steering bermasalah", label: "Power steering", left: "67%", top: "29%" },
-    ],
-  },
-  "chassis-leafspring": {
-    title: "Per, Shock & Rem Depan", src: dimg("truck-chassis-front-leafspring-shock.jpg"), alt: "Detail per, shock, rem depan",
-    parts: [
-      { fm: "Per/suspensi patah", id: "per-1", label: "Per 1", left: "27.3%", top: "46.7%" },
-      { fm: "Shockbreaker rusak", id: "shock-1", label: "Shock 1", left: "32.7%", top: "18%" },
-      { fm: "Per/suspensi patah", id: "per-2", label: "Per 2", left: "62.4%", top: "51.8%" },
-      { fm: "Shockbreaker rusak", id: "shock-2", label: "Shock 2", left: "71.7%", top: "34.7%" },
-      { gate: "detail-rem", id: "rem-1", label: "Rem 1", left: "19%", top: "46.5%" },
-      { gate: "detail-rem", id: "rem-2", label: "Rem 2", left: "86%", top: "57%" },
-    ],
-  },
-  "chassis-rear": {
-    title: "Kaki-kaki Belakang", src: dimg("truck-chassis-rear.jpg"), alt: "Detail chassis belakang",
-    parts: [
-      { fm: "Kaki-kaki/tie rod rusak", id: "kakikaki-3", label: "Kaki-kaki 3", left: "27.3%", top: "38.1%" },
-      { fm: "Kaki-kaki/tie rod rusak", id: "kakikaki-4", label: "Kaki-kaki 4", left: "27.3%", top: "59.7%" },
-      { fm: "Kaki-kaki/tie rod rusak", id: "kakikaki-5", label: "Kaki-kaki 5", left: "61.9%", top: "38.1%" },
-      { fm: "Kaki-kaki/tie rod rusak", id: "kakikaki-6", label: "Kaki-kaki 6", left: "61.9%", top: "59.7%" },
-    ],
-  },
-  "chassis-tandem1": {
-    title: "Per & Rem - Axle Tandem 1", src: dimg("truck-chassis-rear-tandem-side.jpg"), alt: "Detail per dan rem tandem 1",
-    parts: [
-      { gate: "detail-rem", id: "rem-3", label: "Rem 3", left: "42%", top: "58%" },
-      { fm: "Per/suspensi patah", id: "per-3", label: "Per 3", left: "52%", top: "29%" },
-      { gate: "detail-rem", id: "rem-4", label: "Rem 4", left: "77%", top: "55%" },
-    ],
-  },
-  "chassis-tandem2": {
-    title: "Per & Rem - Axle Tandem 2", src: dimg("truck-chassis-rear-axle2.jpg"), alt: "Detail per dan rem tandem 2",
-    parts: [
-      { gate: "detail-rem", id: "rem-5", label: "Rem 5", left: "17%", top: "68%" },
-      { fm: "Per/suspensi patah", id: "per-4", label: "Per 4", left: "45%", top: "48%" },
-      { gate: "detail-rem", id: "rem-6", label: "Rem 6", left: "89%", top: "46%" },
-    ],
-  },
-  // Direct instruction, 2026-09-12: a numbered Rem dot needs to offer a
-  // choice, not just auto-pick "Kampas rem habis" -- dashboard.html's
-  // own Detail Rem picture (truck-brake.jpg) shows 3 real possibilities
-  // at any wheel-end: worn pads, a blown line/cylinder, or the bearing
-  // itself. Reached only via a numbered Rem N dot (gate above), same as
-  // the dashboard's own "chassis --> numbered rem --> detail rem" rule.
-  // Deliberate improvement over the dashboard's own leaf-dot data,
-  // though: those 3 leaves there carry no id of their own (generic,
-  // not tied to a specific wheel-end), but a mechanic tapping through
-  // FROM a specific numbered Rem dot clearly knows which wheel-end it
-  // is -- so whichever of the 3 they pick here still gets tagged with
-  // that Rem N as its component_position (see diagramResolvePart),
-  // rather than discarding that information.
-  "detail-rem": {
-    title: "Detail Rem", src: dimg("truck-brake.jpg"), alt: "Detail rem",
-    parts: [
-      { fm: "Kampas rem habis", label: "Kampas rem", left: "65%", top: "67%" },
-      { fm: "Rem blong", label: "Rem blong (silinder roda)", left: "65%", top: "21%" },
-      { fm: "Bearing/laher rusak", label: "Bearing/laher", left: "15%", top: "50%" },
-    ],
-  },
-};
-
-let diagramState = null;
-function freshDiagramState() {
-  return { stack: ["root"], resolvedFm: null, resolvedLabel: null, componentPosition: null, wheelPosition: null, categoryFilter: null };
-}
-diagramState = freshDiagramState();
-
-// Holds the numbered slot (e.g. "rem-3") a "gate" hotspot was tapped
-// from, on the way to a generic detail screen (detail-rem) whose own
-// leaf parts carry no id of their own -- see the detail-rem screen's
-// comment above. Cleared any time the diagram is showing a screen
-// OTHER than the one it was set for (renderDiagram, below), so it can
-// never leak onto an unrelated part picked after backing out.
-let diagramPendingPositionId = null;
-let diagramPendingPositionLabel = "";
-
-function diagramFindFmId(name) {
-  const f = catalogs.failureModes.find((x) => x.name === name);
-  return f ? f.id : null;
-}
-
-function diagramResetFmOptions() {
-  document.getElementById("f-failure-mode").innerHTML = newFailureModeOptions();
-}
-
-function diagramApplyResult() {
-  const fmSel = document.getElementById("f-failure-mode");
-  let list = newIssueFailureModes();
-  if (diagramState.categoryFilter) list = list.filter((f) => f.category === diagramState.categoryFilter);
-  fmSel.innerHTML = list.map((f) => `<option value="${f.id}">${f.name}</option>`).join("");
-  if (diagramState.resolvedFm) {
-    const fid = diagramFindFmId(diagramState.resolvedFm);
-    if (fid) fmSel.value = fid;
-  }
-  document.getElementById("diagram-result-text").textContent = "📍 " + diagramState.resolvedLabel;
-  document.getElementById("diagram-picker").style.display = "none";
-  document.getElementById("diagram-summary").style.display = "flex";
-  document.getElementById("diagram-skip-note").style.display = "none";
-}
-
-function diagramResolveZoneCategory(z) {
-  diagramState.componentPosition = null;
-  diagramState.wheelPosition = null;
-  diagramState.categoryFilter = z.key;
-  diagramState.resolvedFm = null;
-  diagramState.resolvedLabel = z.label + " (semua jenis)";
-  diagramApplyResult();
-}
-
-function diagramResolvePart(p) {
-  // p.id covers a part that's numbered on its own picture (Per 2,
-  // Gardan 1, ...); diagramPendingPositionId covers a generic leaf with
-  // no id of its own that was reached via a gated numbered dot instead
-  // (detail-rem's 3 choices, reached from a specific Rem N).
-  diagramState.componentPosition = p.id || diagramPendingPositionId || null;
-  diagramState.wheelPosition = null;
-  diagramState.categoryFilter = null;
-  diagramState.resolvedFm = p.fm;
-  diagramState.resolvedLabel = diagramPendingPositionLabel ? `${diagramPendingPositionLabel} - ${p.label}` : p.label;
-  diagramPendingPositionId = null;
-  diagramPendingPositionLabel = "";
-  diagramApplyResult();
-}
-
-function diagramResolveWheel(w) {
-  diagramState.componentPosition = null;
-  diagramState.wheelPosition = w.code;
-  diagramState.categoryFilter = "ban";
-  // Ban bocor/pecah is the default guess for tapping a wheel directly --
-  // still a normal, fully-editable dropdown afterward (narrowed to the
-  // 'ban' category, same as every other resolved tap) in case it's
-  // actually Baud roda/Velg instead.
-  diagramState.resolvedFm = "Ban bocor/pecah";
-  diagramState.resolvedLabel = "Roda " + w.num;
-  diagramApplyResult();
-}
-
-function renderDiagram() {
-  const screenId = diagramState.stack[diagramState.stack.length - 1];
-  const screen = DIAGRAM_SCREENS[screenId];
-  // A pending numbered position (set right before pushing a gate
-  // screen) is only ever valid for THAT screen -- clear it the instant
-  // we're rendering anything else, so it can never survive a back-out
-  // and attach itself to some unrelated part picked afterward.
-  if (screenId !== "detail-rem") { diagramPendingPositionId = null; diagramPendingPositionLabel = ""; }
-  document.getElementById("diagram-title").textContent =
-    screenId === "detail-rem" && diagramPendingPositionLabel ? `Detail Rem - ${diagramPendingPositionLabel}` : screen.title;
-  document.getElementById("diagram-back").style.display = diagramState.stack.length > 1 ? "" : "none";
-  const body = document.getElementById("diagram-body");
-
-  if (screen.menu) {
-    const wrap = document.createElement("div");
-    wrap.className = "diagram-menu";
-    screen.menu.forEach((m) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "diagram-menu-btn";
-      btn.textContent = m.label;
-      btn.addEventListener("click", () => {
-        diagramState.stack.push(m.go);
-        renderDiagram();
-      });
-      wrap.appendChild(btn);
-    });
-    body.innerHTML = "";
-    body.appendChild(wrap);
-    return;
-  }
-
-  body.innerHTML = `<div class="diagram-imgwrap"><img src="${screen.src}" alt="${screen.alt}"><div class="diagram-dots" id="diagram-dots"></div></div>`;
-  if (screen.altGo) {
-    const altBtn = document.createElement("button");
-    altBtn.type = "button";
-    altBtn.className = "diagram-altgo";
-    altBtn.textContent = screen.altGo.label;
-    altBtn.addEventListener("click", () => {
-      diagramState.stack.push(screen.altGo.go);
-      renderDiagram();
-    });
-    body.appendChild(altBtn);
-  }
-
-  const dotsEl = document.getElementById("diagram-dots");
-  const addDot = (left, top, text, onClick) => {
-    const d = document.createElement("button");
-    d.type = "button";
-    d.className = "diagram-dot";
-    d.style.left = left;
-    d.style.top = top;
-    d.textContent = text;
-    d.addEventListener("click", onClick);
-    dotsEl.appendChild(d);
-  };
-
-  (screen.zones || []).forEach((z) => {
-    addDot(z.left, z.top, z.label, () => {
-      if (z.go) { diagramState.stack.push(z.go); renderDiagram(); }
-      else { diagramResolveZoneCategory(z); }
-    });
-  });
-  (screen.wheels || []).forEach((w) => {
-    addDot(w.left, w.top, String(w.num), () => diagramResolveWheel(w));
-  });
-  (screen.parts || []).forEach((p) => {
-    addDot(p.left, p.top, p.label, () => {
-      if (p.routine) {
-        diagramShowRoutineInfo(p);
-      } else if (p.gate) {
-        diagramPendingPositionId = p.id || null;
-        diagramPendingPositionLabel = p.label;
-        diagramState.stack.push(p.gate);
-        renderDiagram();
-      } else {
-        diagramResolvePart(p);
-      }
-    });
-  });
-}
-
-document.getElementById("diagram-back").addEventListener("click", () => {
-  if (diagramState.stack.length > 1) { diagramState.stack.pop(); renderDiagram(); }
-});
-document.getElementById("diagram-change-btn").addEventListener("click", () => {
-  diagramState = freshDiagramState();
-  diagramResetFmOptions();
-  document.getElementById("diagram-summary").style.display = "none";
-  document.getElementById("diagram-routine-panel").style.display = "none";
-  document.getElementById("diagram-picker").style.display = "block";
-  renderDiagram();
-});
-document.getElementById("diagram-skip-btn").addEventListener("click", () => {
-  diagramState = freshDiagramState();
-  diagramResetFmOptions();
-  document.getElementById("diagram-picker").style.display = "none";
-  document.getElementById("diagram-summary").style.display = "none";
-  document.getElementById("diagram-routine-panel").style.display = "none";
-  document.getElementById("diagram-skip-note").style.display = "block";
-});
-document.getElementById("diagram-resume-btn").addEventListener("click", () => {
-  diagramState = freshDiagramState();
-  document.getElementById("diagram-skip-note").style.display = "none";
-  document.getElementById("diagram-routine-panel").style.display = "none";
-  document.getElementById("diagram-picker").style.display = "block";
-  renderDiagram();
-});
-
-// Direct feedback, 2026-09-09: "report can start with rem blong, but
-// somehow we need to categorize failure modes." Typing a description
-// (debounced -- one call per pause in typing, not per keystroke) asks
-// mekanik-api's classify_failure_mode to suggest the matching Jenis
-// kerusakan entry and auto-selects it. Still just a suggestion --
-// the dropdown stays a normal, fully manual-editable select, and the
-// hint text says so explicitly so a mechanic doesn't mistake this for
-// something locked in. A blank/failed classification silently leaves
-// the dropdown at whatever it already was (its own default, or a
-// mechanic's prior manual pick) -- never blocks or resets the form.
-function wireFailureModeSuggest(descId, selId, hintId) {
-  const descEl = document.getElementById(descId);
-  const selEl = document.getElementById(selId);
-  const hintEl = document.getElementById(hintId);
-  if (!descEl || !selEl) return;
-  let timer = null;
-  descEl.addEventListener("input", () => {
-    if (timer) clearTimeout(timer);
-    const text = descEl.value.trim();
-    if (text.length < 4) { if (hintEl) hintEl.textContent = ""; return; }
-    timer = setTimeout(async () => {
-      try {
-        const { failure_mode_id, confidence } = await call("classify_failure_mode", { description: text });
-        if (!failure_mode_id || confidence === "none") { if (hintEl) hintEl.textContent = ""; return; }
-        const match = catalogs.failureModes.find((f) => f.id === failure_mode_id);
-        if (!match) return;
-        selEl.value = failure_mode_id;
-        if (hintEl) hintEl.textContent = "🤖 Terdeteksi: " + match.name + " -- ubah di atas jika salah";
-      } catch (e) {
-        // Silent -- a failed suggestion never blocks manual selection.
-      }
-    }, 800);
-  });
-}
-wireFailureModeSuggest("f-description", "f-failure-mode", "f-fm-hint");
-
-document.getElementById("btn-create").addEventListener("click", async () => {
-  const btn = document.getElementById("btn-create");
-  btn.disabled = true;
-  try {
-    await call("create_repair", {
-      truck_id: document.getElementById("f-truck").value,
-      location: document.getElementById("f-location").value,
-      failure_mode_id: document.getElementById("f-failure-mode").value,
-      description: document.getElementById("f-description").value,
-      wheel_position: diagramState.wheelPosition || null,
-      component_position: diagramState.componentPosition || null,
-    });
-    document.getElementById("f-description").value = "";
-    toast("Laporan servis disimpan.");
-    if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
-    // Reset the diagram picker for the next report -- otherwise a
-    // resolved position/filter from the last report would silently
-    // carry over onto one that has nothing to do with it.
-    diagramState = freshDiagramState();
-    diagramResetFmOptions();
-    document.getElementById("diagram-summary").style.display = "none";
-    document.getElementById("diagram-skip-note").style.display = "none";
-    document.getElementById("diagram-routine-panel").style.display = "none";
-    document.getElementById("diagram-picker").style.display = "block";
-    renderDiagram();
-  } catch (e) {
-    toast("Gagal: " + e.message);
-  } finally {
-    btn.disabled = false;
-  }
-});
-
-// Same catalog as skl-route-agent/dashboard.html's own
-// ROUTINE_MAINTENANCE_ITEMS (hand-kept in sync, same convention as
-// LOCATION_LABELS/ISSUE_STATUS_LABELS already are) -- quantity only
-// makes sense for the two fluids, and oli mesin/minyak rem are measured
-// in very different quantities (liter vs ml), so unit comes from here
-// rather than being hardcoded per-field.
 const ROUTINE_ITEMS = [
   { type: "filter_solar", label: "Filter solar" },
   { type: "filter_oli", label: "Filter oli" },
-  { type: "oli_mesin", label: "Oli mesin", hasQuantity: true, unit: "liter" },
-  { type: "minyak_rem", label: "Minyak rem", hasQuantity: true, unit: "ml" },
+  { type: "oli_mesin", label: "Oli mesin", unit: "liter", step: 1 },
+  { type: "minyak_rem", label: "Minyak rem", unit: "ml", step: 100 },
   { type: "terpal", label: "Terpal" },
 ];
-document.getElementById("r-item-type").innerHTML = ROUTINE_ITEMS
-  .map((it) => `<option value="${it.type}">${it.label}</option>`)
-  .join("");
+// Suggestions only -- the mechanic can always add any part by name. What
+// is bought, and where, stays staff's decision (standing rule, 2026-08-28).
+const PART_SUGGESTIONS = {
+  rem: ["Kampas rem", "Selang rem", "Minyak rem", "Master rem", "Klem selang"],
+  ban: ["Ban", "Baud roda", "Mur roda", "Velg"],
+  mesin: ["Oli mesin", "Filter oli", "Filter solar", "Selang radiator", "V-belt"],
+  kelistrikan: ["Aki", "Sekring", "Bohlam", "Kabel", "Kepala aki"],
+  chassis: ["Per daun", "Baut per", "Shockbreaker", "Bearing", "Tie rod"],
+  transmisi: ["Kampas kopling", "Oli transmisi", "Master kopling", "Cross joint"],
+  bahan_bakar: ["Filter solar", "Selang solar"],
+  kabin: ["Wiper", "Kaca", "Lampu"],
+  bak: ["Papan bak", "Baut", "Terpal"],
+};
 
-// Report-kind fork -- see the HTML comment above #report-kind-fork.
-// Both forms stay in the DOM the whole time (simpler than tearing down/
-// rebuilding); this just toggles which one is visible. Neither "back"
-// button resets the OTHER form's own state -- deliberately, in case a
-// mechanic taps back by mistake and wants to resume where they left off.
-function showReportKindFork() {
-  document.getElementById("report-kind-fork").style.display = "flex";
-  document.getElementById("new-masalah-form").style.display = "none";
-  document.getElementById("new-rutin-form").style.display = "none";
-}
-function showMasalahForm() {
-  document.getElementById("report-kind-fork").style.display = "none";
-  document.getElementById("new-masalah-form").style.display = "block";
-  document.getElementById("new-rutin-form").style.display = "none";
-}
-// Also callable directly from the diagram's routine-item shortcut (see
-// diagramShowRoutineInfo below), not just the fork -- explicitly hides
-// new-masalah-form too so both forms are never visible at once
-// regardless of which state this was called from.
-function showRutinForm() {
-  document.getElementById("report-kind-fork").style.display = "none";
-  document.getElementById("new-masalah-form").style.display = "none";
-  document.getElementById("new-rutin-form").style.display = "block";
-  const dateEl = document.getElementById("r-performed-at");
-  if (!dateEl.value) dateEl.value = new Date().toISOString().slice(0, 10);
-  updateQuantityRowVisibility();
-}
-
-// Routine-item diagram dots (Filter oli/Filter solar) -- shows history
-// instead of dropping into the failure-mode picker, since these answer
-// "what work was done" not "what's wrong". See diagram-routine-panel.
-async function diagramShowRoutineInfo(p) {
-  document.getElementById("diagram-picker").style.display = "none";
-  const panel = document.getElementById("diagram-routine-panel");
-  panel.style.display = "block";
-  panel.dataset.itemType = p.routine;
-  document.getElementById("diagram-routine-title").textContent = p.label;
-  const historyEl = document.getElementById("diagram-routine-history");
-  historyEl.textContent = "Memuat riwayat...";
-  const truckId = document.getElementById("f-truck").value;
-  if (!truckId) { historyEl.textContent = "Pilih truk dulu untuk melihat riwayat."; return; }
-  try {
-    const { latestByItem } = await call("list_routine_maintenance", { truck_id: truckId });
-    const log = latestByItem && latestByItem[p.routine];
-    historyEl.textContent = log
-      ? `Terakhir: ${log.performed_at} oleh ${log.performed_by}` + (log.quantity ? ` (${log.quantity} ${log.unit || ""})` : "")
-      : "Belum pernah dicatat untuk truk ini.";
-  } catch (e) {
-    historyEl.textContent = "Gagal memuat riwayat: " + e.message;
-  }
-}
-document.getElementById("diagram-routine-back-btn").addEventListener("click", () => {
-  document.getElementById("diagram-routine-panel").style.display = "none";
-  document.getElementById("diagram-picker").style.display = "block";
-});
-document.getElementById("diagram-routine-log-btn").addEventListener("click", () => {
-  const itemType = document.getElementById("diagram-routine-panel").dataset.itemType;
-  const truckId = document.getElementById("f-truck").value;
-  showRutinForm();
-  if (truckId) document.getElementById("r-truck").value = truckId;
-  document.getElementById("r-item-type").value = itemType;
-  updateQuantityRowVisibility();
-});
-function updateQuantityRowVisibility() {
-  const item = ROUTINE_ITEMS.find((it) => it.type === document.getElementById("r-item-type").value);
-  document.getElementById("r-quantity-row").classList.toggle("visible", !!(item && item.hasQuantity));
-  if (item && item.hasQuantity) {
-    document.getElementById("r-quantity-label").textContent = `Jumlah (${item.unit}, opsional)`;
-  }
-}
-document.getElementById("btn-kind-masalah").addEventListener("click", showMasalahForm);
-document.getElementById("btn-kind-rutin").addEventListener("click", showRutinForm);
-document.getElementById("btn-kind-back-1").addEventListener("click", showReportKindFork);
-document.getElementById("btn-kind-back-2").addEventListener("click", showReportKindFork);
-document.getElementById("r-item-type").addEventListener("change", updateQuantityRowVisibility);
-
-document.getElementById("btn-create-rutin").addEventListener("click", async () => {
-  const btn = document.getElementById("btn-create-rutin");
-  btn.disabled = true;
-  try {
-    const itemType = document.getElementById("r-item-type").value;
-    const item = ROUTINE_ITEMS.find((it) => it.type === itemType);
-    await call("add_routine_maintenance", {
-      truck_id: document.getElementById("r-truck").value,
-      item_type: itemType,
-      performed_at: document.getElementById("r-performed-at").value,
-      quantity: item && item.hasQuantity ? (document.getElementById("r-quantity").value || null) : null,
-      unit: item && item.hasQuantity ? item.unit : null,
-      notes: document.getElementById("r-notes").value,
-    });
-    toast("Servis rutin dicatat.");
-    if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
-    document.getElementById("r-quantity").value = "";
-    document.getElementById("r-notes").value = "";
-    showReportKindFork();
-  } catch (e) {
-    toast("Gagal: " + e.message);
-  } finally {
-    btn.disabled = false;
-  }
-});
-
-async function loadOpenRepairs() {
-  const el = document.getElementById("list-open");
-  // Preserve which cards were already expanded across a refresh (add
-  // issue / update location / etc. all reload this list) -- otherwise
-  // every action collapses the card you were just working in.
-  const openIds = new Set(
-    [...el.querySelectorAll("details.repair-card[open]")].map((d) => d.dataset.id),
-  );
-  el.className = "";
-  el.innerHTML = "Memuat...";
-  const { repairs } = await call("list_open_repairs");
-  if (!repairs || repairs.length === 0) {
-    el.className = "empty";
-    el.innerHTML = "Tidak ada servis yang sedang berjalan.";
-    return;
-  }
-  el.innerHTML = repairs
-    .map((r) => {
-      const issues = r.repair_record_issues || [];
-      const issueCount = issues.length;
-      const loc = r.location ? LOCATION_LABELS[r.location] || r.location : "";
-      // mark_done's own server-side gate requires EVERY issue 'done' --
-      // mirrored client-side so the button reads as disabled/explained
-      // instead of a mechanic tapping it and just getting an error toast.
-      const allDone = issueCount > 0 && issues.every((i) => i.status === "done");
-      return `
-      <details class="repair-card" data-id="${r.id}" ${openIds.has(r.id) ? "open" : ""}>
-        <summary class="repair-summary">
-          <span class="truck-id">Truk ${r.truck_id}</span>
-          <span class="repair-summary-meta">Servis #${r.seq} &middot; ${issueCount} masalah${loc ? " &middot; " + loc : ""}</span>
-        </summary>
-        <div class="repair-body">
-        <div class="card-meta">Mulai ${formatDate(r.downtime_start)}</div>
-        <div class="card-section">
-          <label>Lokasi</label>
-          <select class="f-location">${locationOptions(r.location)}</select>
-        </div>
-        <div class="card-section issues-list">
-          ${issues.map((i) => `<div class="issue-unit">${editableIssueRowHtml(i)}${issueActionsHtml(i)}</div>`).join("") || '<div class="issue-row">(belum ada masalah tercatat)</div>'}
-        </div>
-        <details class="add-issue card-section">
-          <summary>+ Tambah masalah</summary>
-          <label>Jenis kerusakan</label>
-          <select class="new-issue-fm">${newFailureModeOptions()}</select>
-          <div class="fm-hint new-issue-fm-hint"></div>
-          <label>Deskripsi</label>
-          <textarea class="new-issue-desc" placeholder="Jelaskan kerusakan yang ditemukan... (mis. &quot;rem blong&quot;)"></textarea>
-          <button class="btn-add-issue">Tambah</button>
-        </details>
-        <div class="card-section photo-row">
-          <label class="photo-btn">
-            <span class="photo-btn-label">📷 Tambah Foto/Video</span>
-            <input type="file" accept="image/*,video/*" capture="environment" class="photo-input" />
-          </label>
-          ${(() => {
-            const photos = r.repair_photos || [];
-            const before = photos.filter((p) => p.phase === "before").length;
-            const after = photos.filter((p) => p.phase === "after").length;
-            if (!before && !after) return "";
-            const parts = [];
-            if (before) parts.push(before + " sebelum");
-            if (after) parts.push(after + " sesudah");
-            return `<div class="photo-count">${parts.join(" · ")}</div>`;
-          })()}
-        </div>
-        ${allDone
-          ? `<button class="btn-done">Tandai Selesai</button>`
-          : `<div class="btn-done-disabled">Selesaikan semua masalah dulu untuk menutup servis ini</div>`}
-        </div>
-      </details>
-    `;
-    })
-    .join("");
-
-  el.querySelectorAll(".f-location").forEach((sel) => {
-    sel.addEventListener("change", async () => {
-      const card = sel.closest(".repair-card");
-      sel.disabled = true;
-      try {
-        await call("update_location", { id: card.dataset.id, location: sel.value });
-        toast("Lokasi diperbarui.");
-        if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
-      } catch (e) {
-        toast("Gagal: " + e.message);
-      } finally {
-        sel.disabled = false;
-      }
-    });
+// ---------- the truck photos: two levels, never deeper ----------
+// Level 1: the side view, one chip per zone. Level 2: the zone's close-up
+// photos as a strip of thumbnails (what used to be text menus). Dot
+// coordinates are the same as dashboard.html's and the old page's; the
+// side-view chips sit at tuned spots so the labels don't overlap.
+// `cats` = the failure_mode categories the zone's list shows.
+const ZONES = [
+  { key: "kabin", label: "Kabin", left: 17, top: 29, cats: ["kabin"], group: "kabin" },
+  { key: "kelistrikan", label: "Listrik", left: 8, top: 47, cats: ["kelistrikan"], group: "kelistrikan" },
+  { key: "mesin", label: "Mesin", left: 18, top: 64, cats: ["mesin"], group: "mesin" },
+  { key: "transmisi", label: "Powertrain", left: 46, top: 58, cats: ["transmisi"], group: "powertrain" },
+  { key: "bahan_bakar", label: "Tangki", left: 38, top: 82, cats: ["bahan_bakar"] },
+  { key: "chassis", label: "Chassis & rem", left: 64, top: 74, cats: ["chassis", "rem"], group: "chassis" },
+  { key: "bak", label: "Body", left: 64, top: 44, cats: ["bak"] },
+  { key: "ban", label: "Roda", left: 84, top: 88, cats: ["ban"], group: "roda" },
+];
+const GROUPS = {
+  kabin: [{ title: "Kabin", src: "truck-cabin.jpg", parts: [
+    { fm: "Dashboard/panel rusak", label: "Dashboard", left: 40, top: 25 },
+    { fm: "AC tidak dingin", label: "AC", left: 27, top: 41 },
+    { fm: "Wiper rusak", label: "Wiper", left: 38.6, top: 18.9 },
+    { fm: "Jok/kursi rusak", label: "Jok/kursi", left: 73.6, top: 45.9 },
+    { fm: "Kaca pecah/retak", label: "Kaca", left: 10, top: 13 },
+  ]}],
+  kelistrikan: [{ title: "Kelistrikan", src: "truck-electrical.jpg", parts: [
+    { fm: "Aki soak", id: "aki-1", label: "Aki 1", left: 26, top: 23 },
+    { fm: "Aki soak", id: "aki-2", label: "Aki 2", left: 60, top: 19 },
+    { fm: "Kepala aki kendor/korosi", id: "kepala-aki-1", label: "Kepala aki 1", left: 38.59, top: 30 },
+    { fm: "Kepala aki kendor/korosi", id: "kepala-aki-2", label: "Kepala aki 2", left: 55.2, top: 8 },
+    { fm: "Kelistrikan lain", label: "Sekring", left: 71, top: 48 },
+  ]}],
+  mesin: [
+    { title: "Mesin (dalam)", src: "truck-engine.jpg", parts: [
+      { fm: "Kruk as rusak", label: "Kruk as", left: 50, top: 88 },
+      { fm: "Turbo rusak", label: "Turbo", left: 62, top: 45 },
+      { fm: "Pompa injeksi/injektor bermasalah", label: "Injektor", left: 78, top: 15 },
+      { fm: "Kebocoran oli", label: "Bocor oli", left: 35, top: 85 },
+      { fm: "Pompa air (water pump) bocor", label: "Pompa air", left: 12, top: 40 },
+    ]},
+    { title: "Radiator", src: "truck-radiator.jpg", parts: [
+      { fm: "Radiator bocor", label: "Radiator", left: 55, top: 15 },
+    ]},
+    { title: "Bak oli & hidrolik", src: "truck-engine-oilpan-hydraulic.jpg", parts: [
+      { fm: "Kebocoran oli", label: "Bak oli", left: 42, top: 48 },
+      { fm: "Pompa hidrolik bocor/rusak", label: "Pompa hidrolik", left: 61, top: 48 },
+    ]},
+    { title: "Mesin luar", src: "truck-engine-exterior.jpg", parts: [
+      { fm: "Alternator/dinamo rusak", label: "Alternator", left: 49, top: 34 },
+      { routine: "filter_solar", label: "Filter solar", left: 62.9, top: 49.6 },
+      { routine: "filter_oli", label: "Filter oli", left: 58.9, top: 79.3 },
+      { fm: "Dinamo starter rusak", label: "Starter", left: 75.5, top: 64 },
+    ]},
+  ],
+  powertrain: [{ title: "Powertrain", src: "truck-underside.jpg", parts: [
+    { fm: "Gearbox/transmisi bermasalah", label: "Transmisi", left: 14, top: 49 },
+    { fm: "Kopel/as kopel rusak", id: "powertrain-kopel-1", label: "Kopel 1", left: 45, top: 50 },
+    { fm: "As roda/gardan rusak", id: "powertrain-gardan-1", label: "Gardan 1", left: 72, top: 48 },
+    { fm: "Kopel/as kopel rusak", id: "powertrain-kopel-2", label: "Kopel 2", left: 79, top: 62 },
+    { fm: "As roda/gardan rusak", id: "powertrain-gardan-2", label: "Gardan 2", left: 87, top: 48 },
+  ]}],
+  chassis: [
+    { title: "Kaki-kaki depan", src: "truck-chassis-front.jpg", parts: [
+      { fm: "Kaki-kaki/tie rod rusak", id: "kakikaki-1", label: "Kaki-kaki 1", left: 37, top: 27 },
+      { fm: "Kaki-kaki/tie rod rusak", id: "kakikaki-2", label: "Kaki-kaki 2", left: 37, top: 73 },
+      { fm: "Power steering bermasalah", label: "Power steering", left: 67, top: 29 },
+    ]},
+    { title: "Per & rem depan", src: "truck-chassis-front-leafspring-shock.jpg", parts: [
+      { fm: "Per/suspensi patah", id: "per-1", label: "Per 1", left: 30, top: 58 },
+      { fm: "Shockbreaker rusak", id: "shock-1", label: "Shock 1", left: 32.7, top: 18 },
+      { fm: "Per/suspensi patah", id: "per-2", label: "Per 2", left: 62.4, top: 51.8 },
+      { fm: "Shockbreaker rusak", id: "shock-2", label: "Shock 2", left: 71.7, top: 34.7 },
+      { brake: true, id: "rem-1", label: "Rem 1", left: 16, top: 40 },
+      { brake: true, id: "rem-2", label: "Rem 2", left: 86, top: 57 },
+    ]},
+    { title: "Kaki-kaki belakang", src: "truck-chassis-rear.jpg", parts: [
+      { fm: "Kaki-kaki/tie rod rusak", id: "kakikaki-3", label: "Kaki-kaki 3", left: 27.3, top: 38.1 },
+      { fm: "Kaki-kaki/tie rod rusak", id: "kakikaki-4", label: "Kaki-kaki 4", left: 27.3, top: 59.7 },
+      { fm: "Kaki-kaki/tie rod rusak", id: "kakikaki-5", label: "Kaki-kaki 5", left: 61.9, top: 38.1 },
+      { fm: "Kaki-kaki/tie rod rusak", id: "kakikaki-6", label: "Kaki-kaki 6", left: 61.9, top: 59.7 },
+    ]},
+    { title: "Tandem 1", src: "truck-chassis-rear-tandem-side.jpg", parts: [
+      { brake: true, id: "rem-3", label: "Rem 3", left: 42, top: 58 },
+      { fm: "Per/suspensi patah", id: "per-3", label: "Per 3", left: 52, top: 29 },
+      { brake: true, id: "rem-4", label: "Rem 4", left: 77, top: 55 },
+    ]},
+    { title: "Tandem 2", src: "truck-chassis-rear-axle2.jpg", parts: [
+      { brake: true, id: "rem-5", label: "Rem 5", left: 17, top: 68 },
+      { fm: "Per/suspensi patah", id: "per-4", label: "Per 4", left: 45, top: 48 },
+      { brake: true, id: "rem-6", label: "Rem 6", left: 89, top: 46 },
+    ]},
+  ],
+  roda: [
+    { title: "Roda (tampak bawah)", src: "truck-underside.jpg", wheels: [
+      { code: "FL", num: 1, left: 8, top: 8 }, { code: "FR", num: 2, left: 8, top: 92 },
+      { code: "RL1_OUT", num: 3, left: 70, top: 8 }, { code: "RL1_IN", num: 4, left: 76, top: 22 },
+      { code: "RR1_OUT", num: 5, left: 70, top: 92 }, { code: "RR1_IN", num: 6, left: 76, top: 78 },
+      { code: "RL2_OUT", num: 7, left: 90, top: 8 }, { code: "RL2_IN", num: 8, left: 96, top: 22 },
+      { code: "RR2_OUT", num: 9, left: 90, top: 92 }, { code: "RR2_IN", num: 10, left: 96, top: 78 },
+    ]},
+    { title: "Velg & baud", src: "truck-wheel-rim.jpg", parts: [
+      { fm: "Velg rusak/penyok", label: "Velg", left: 32, top: 45 },
+      { fm: "Baud roda kendor/patah", label: "Baud roda", left: 61, top: 32 },
+    ]},
+  ],
+};
+// A numbered brake used to open a third picture (Detail Rem). It is a small
+// choice over the photo now, and keeps the wheel-end it came from.
+const BRAKE_CHOICES = ["Kampas rem habis", "Rem blong", "Bearing/laher rusak", "Selang rem bocor/rusak"];
+const WHEEL_CHOICES = ["Ban bocor/pecah", "Baud roda kendor/patah", "Velg rusak/penyok"];
+const POSITION_LABELS = (() => {
+  const m = {};
+  Object.values(GROUPS).flat().forEach((p) => {
+    (p.parts || []).forEach((x) => { if (x.id) m[x.id] = x.label; });
+    (p.wheels || []).forEach((w) => { m[w.code] = "Roda " + w.num; });
   });
-
-  // Same suggestion behavior as Lapor Baru's Deskripsi field (see
-  // wireFailureModeSuggest), wired per-card here since "+ Tambah
-  // masalah" is a repeated element, not a single fixed id.
-  el.querySelectorAll(".new-issue-desc").forEach((descEl) => {
-    const card = descEl.closest(".add-issue");
-    const selEl = card.querySelector(".new-issue-fm");
-    const hintEl = card.querySelector(".new-issue-fm-hint");
-    let timer = null;
-    descEl.addEventListener("input", () => {
-      if (timer) clearTimeout(timer);
-      const text = descEl.value.trim();
-      if (text.length < 4) { hintEl.textContent = ""; return; }
-      timer = setTimeout(async () => {
-        try {
-          const { failure_mode_id, confidence } = await call("classify_failure_mode", { description: text });
-          if (!failure_mode_id || confidence === "none") { hintEl.textContent = ""; return; }
-          const match = catalogs.failureModes.find((f) => f.id === failure_mode_id);
-          if (!match) return;
-          selEl.value = failure_mode_id;
-          hintEl.textContent = "🤖 Terdeteksi: " + match.name + " -- ubah di atas jika salah";
-        } catch (e) {
-          // Silent -- a failed suggestion never blocks manual selection.
-        }
-      }, 800);
-    });
-  });
-
-  el.querySelectorAll(".btn-add-issue").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const card = btn.closest(".repair-card");
-      const details = btn.closest(".add-issue");
-      btn.disabled = true;
-      try {
-        await call("add_issue", {
-          repair_record_id: card.dataset.id,
-          failure_mode_id: card.querySelector(".new-issue-fm").value,
-          description: card.querySelector(".new-issue-desc").value,
-        });
-        toast("Masalah ditambahkan.");
-        if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
-        details.open = false;
-        loadOpenRepairs();
-      } catch (e) {
-        toast("Gagal: " + e.message);
-        btn.disabled = false;
-      }
-    });
-  });
-
-  el.querySelectorAll(".btn-request-parts").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const card = btn.closest(".repair-card");
-      const row = btn.closest(".issue-actions");
-      const input = row.querySelector(".issue-parts-needed");
-      btn.disabled = true;
-      try {
-        // Per-issue submit (2026-08-30, direct feedback while testing --
-        // was one bulk button for the whole session; real bug found:
-        // leaving a not-yet-diagnosed masalah's input blank was
-        // indistinguishable from "genuinely no part needed" and wrongly
-        // fast-forwarded it. request_parts' payload still accepts an
-        // array -- this just always sends a single-item one now.
-        await call("request_parts", {
-          repair_record_id: card.dataset.id,
-          issues: [{ id: row.dataset.issueId, parts_used: input.value }],
-        });
-        toast("Permintaan suku cadang diajukan.");
-        if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
-        loadOpenRepairs();
-      } catch (e) {
-        toast("Gagal: " + e.message);
-        btn.disabled = false;
-      }
-    });
-  });
-
-  el.querySelectorAll(".btn-start-progress").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const row = btn.closest(".issue-actions");
-      btn.disabled = true;
-      try {
-        await call("start_progress_from_vendor", { id: row.dataset.issueId });
-        toast("Perbaikan dimulai.");
-        if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
-        loadOpenRepairs();
-      } catch (e) {
-        toast("Gagal: " + e.message);
-        btn.disabled = false;
-      }
-    });
-  });
-
-  el.querySelectorAll(".btn-issue-done").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const row = btn.closest(".issue-actions");
-      btn.disabled = true;
-      try {
-        await call("mark_issue_done", { id: row.dataset.issueId });
-        toast("Masalah ditandai selesai.");
-        if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
-        loadOpenRepairs();
-      } catch (e) {
-        toast("Gagal: " + e.message);
-        btn.disabled = false;
-      }
-    });
-  });
-
-  // Checklist C2, 2026-08-31. Downscales client-side before upload --
-  // a raw phone-camera photo is several MB, way over what should go
-  // through a base64 JSON payload; capped to 1600px on the long edge,
-  // JPEG quality 0.8, which is plenty for a documentation photo.
-  // Phase (before/after) is no longer picked here -- mekanik-api computes
-  // it server-side from whether every masalah is already 'done' (direct
-  // feedback, 2026-08-31). This button just uploads; media_type tells
-  // the server photo vs video.
-  el.querySelectorAll(".photo-input").forEach((input) => {
-    input.addEventListener("change", async () => {
-      const file = input.files && input.files[0];
-      if (!file) return;
-      const card = input.closest(".repair-card");
-      const labelText = input.closest(".photo-btn").querySelector(".photo-btn-label");
-      const originalText = labelText.textContent;
-      const isVideo = file.type.startsWith("video/");
-
-      if (isVideo && file.size > MAX_VIDEO_BYTES) {
-        toast(`Video terlalu besar (maks ${MAX_VIDEO_BYTES / 1024 / 1024}MB). Ambil video lebih pendek.`);
-        input.value = "";
-        return;
-      }
-
-      labelText.textContent = "Mengunggah...";
-      try {
-        // Videos go up as-is (canvas resize only works on images);
-        // photos get downscaled the same way as before.
-        const base64 = isVideo ? await fileToBase64(file) : await resizeImageToBase64(file, 1600, 0.8);
-        await call("upload_photo", {
-          repair_record_id: card.dataset.id,
-          media_type: isVideo ? "video" : "photo",
-          filename: file.name || (isVideo ? "video.mp4" : "photo.jpg"),
-          content_base64: base64,
-        });
-        toast("Berhasil diunggah.");
-        if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
-        loadOpenRepairs();
-      } catch (e) {
-        toast("Gagal unggah: " + e.message);
-        labelText.textContent = originalText;
-      } finally {
-        input.value = "";
-      }
-    });
-  });
-
-  el.querySelectorAll(".btn-save-issue").forEach((btn) => {
-    btn.addEventListener("click", async (ev) => {
-      ev.preventDefault();
-      const details = btn.closest(".issue-edit");
-      btn.disabled = true;
-      try {
-        await call("update_issue", {
-          id: details.dataset.issueId,
-          failure_mode_id: details.querySelector(".edit-issue-fm").value,
-          description: details.querySelector(".edit-issue-desc").value,
-        });
-        toast("Perubahan disimpan.");
-        if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
-        loadOpenRepairs();
-      } catch (e) {
-        toast("Gagal: " + e.message);
-        btn.disabled = false;
-      }
-    });
-  });
-
-  el.querySelectorAll(".btn-delete-issue").forEach((btn) => {
-    btn.addEventListener("click", async (ev) => {
-      ev.preventDefault();
-      const details = btn.closest(".issue-edit");
-      const confirmed = tg && tg.showConfirm
-        ? await new Promise((resolve) => tg.showConfirm("Hapus masalah ini?", resolve))
-        : confirm("Hapus masalah ini?");
-      if (!confirmed) return;
-      btn.disabled = true;
-      try {
-        await call("delete_issue", { id: details.dataset.issueId });
-        toast("Masalah dihapus.");
-        if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
-        loadOpenRepairs();
-      } catch (e) {
-        toast("Gagal: " + e.message);
-        btn.disabled = false;
-      }
-    });
-  });
-
-  el.querySelectorAll(".btn-done").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const card = btn.closest(".repair-card");
-      btn.disabled = true;
-      try {
-        await call("mark_done", { id: card.dataset.id });
-        toast("Ditandai selesai, menunggu sign-off.");
-        if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
-        loadOpenRepairs();
-      } catch (e) {
-        toast("Gagal: " + e.message);
-        btn.disabled = false;
-      }
-    });
-  });
-}
-
-async function loadPendingSignoff() {
-  const el = document.getElementById("list-signoff");
-  el.className = "";
-  el.innerHTML = "Memuat...";
-  const { repairs } = await call("list_pending_signoff");
-  if (!repairs || repairs.length === 0) {
-    el.className = "empty";
-    el.innerHTML = "Tidak ada servis menunggu sign-off.";
-    return;
-  }
-  el.innerHTML = repairs
-    .map((r) => {
-      const issues = r.repair_record_issues || [];
-      return `
-      <div class="card" data-id="${r.id}">
-        <div class="card-title"><span class="truck-id">Truk ${r.truck_id}</span></div>
-        <div class="card-meta">Servis #${r.seq} &middot; Mulai ${formatDate(r.downtime_start)}</div>
-        <div class="card-section issues-list">
-          ${issues.map(issueRowHtml).join("") || '<div class="issue-row">(belum ada masalah tercatat)</div>'}
-        </div>
-        <div class="card-total card-section">
-          ${r.location ? LOCATION_LABELS[r.location] || r.location : ""}
-          ${r.mechanics ? " -- oleh " + r.mechanics.name : ""}
-        </div>
-        <button class="btn-signoff">Konfirmasi Selesai (Sign-off)</button>
-      </div>
-    `;
-    })
-    .join("");
-
-  el.querySelectorAll(".btn-signoff").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const card = btn.closest(".card");
-      btn.disabled = true;
-      try {
-        await call("sign_off", { id: card.dataset.id });
-        toast("Sign-off tercatat.");
-        if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
-        loadPendingSignoff();
-      } catch (e) {
-        toast("Gagal: " + e.message);
-        btn.disabled = false;
-      }
-    });
-  });
-}
-
-document.querySelectorAll(".tab").forEach((tab) => {
-  tab.addEventListener("click", () => setScreen(tab.dataset.screen));
-});
-
-(async function init() {
-  if (!tg) {
-    document.getElementById("notTelegram").style.display = "block";
-    return;
-  }
-  tg.ready();
-  tg.expand();
-  document.getElementById("app").style.display = "block";
-  const greetName = tg.initDataUnsafe?.user?.first_name;
-  document.getElementById("mechanicName").textContent = greetName ? "Halo, " + greetName : "";
-  try {
-    await loadCatalogs();
-  } catch (e) {
-    toast("Gagal memuat data: " + e.message);
-  }
-  renderDiagram();
+  return m;
 })();
+
+// ---------- state ----------
+const S = {
+  mode: DEMO ? "demo" : tg ? "telegram" : "tablet",
+  deviceKey: null, session: null, me: null,
+  lock: { mechanics: [], pick: null, pin: "", creating: null, error: "" },
+  data: null,
+  view: "board",           // narrow: board | truck | cek ; wide: right pane truck | cek
+  filter: "work",          // work | all
+  truckId: null,
+  sheet: null,
+  pending: null,           // { label, run, timer, key }
+};
+const wide = () => window.matchMedia("(min-width: 900px)").matches;
+
+// ---------- helpers ----------
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const $ = (sel, root = document) => root.querySelector(sel);
+const haptic = (kind) => { try { tg && tg.HapticFeedback && tg.HapticFeedback.notificationOccurred(kind); } catch (e) { /* ignore */ } };
+const chevron = (color = "#B0A594") => `<svg class="chev" viewBox="0 0 10 18" aria-hidden="true"><path d="M2 2l6 7-6 7" fill="none" stroke="${color}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const initial = (n) => esc((n || "?").trim().charAt(0).toUpperCase());
+function fmtDate(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return d.toLocaleDateString("id-ID", { day: "numeric", month: "short" }) + " " + d.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
+}
+function since(iso) {
+  if (!iso) return "";
+  const m = Math.max(0, Math.round((Date.now() - new Date(iso)) / 60000));
+  if (m < 60) return m + " mnt";
+  const h = Math.round(m / 60);
+  return h < 48 ? h + " jam" : Math.round(h / 24) + " hari";
+}
+
+let toastTimer = null;
+function toast(msg, undo) {
+  const el = $("#toast");
+  $("#toast-msg").textContent = msg;
+  $("#toast-undo").classList.toggle("hidden", !undo);
+  el.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove("show"), undo ? UNDO_MS : 2800);
+}
+
+// ---------- API ----------
+async function api(action, payload = {}) {
+  if (S.mode === "demo") return demoApi(action, payload);
+  const body = { action, payload };
+  if (S.mode === "telegram") body.initData = tg.initData;
+  else { body.deviceKey = S.deviceKey; if (S.session) body.sessionToken = S.session; }
+  let resp;
+  try {
+    resp = await fetch(API_URL, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  } catch (e) {
+    throw new Error("Tidak ada koneksi. Coba lagi.");
+  }
+  const out = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    console.error("mekanik-api call failed:", action, resp.status, out);
+    if (out.code === "session_expired" && S.mode === "tablet") { lockNow(true); }
+    if (out.code === "device_unknown") { S.deviceKey = null; try { localStorage.removeItem(DEVICE_KEY_STORE); } catch (e) { /* ignore */ } render(); }
+    const err = new Error(out.error || "Gagal (" + resp.status + ")");
+    err.code = out.code;
+    throw err;
+  }
+  return out;
+}
+
+async function load() {
+  S.data = await api("init_data");
+  S.me = S.data.me || S.me;
+  render();
+}
+
+// ---------- derived data ----------
+function fmById(id) { return (S.data.failureModes || []).find((f) => f.id === id); }
+function fmByName(n) { return (S.data.failureModes || []).find((f) => f.name === n); }
+function mechName(id) { const m = (S.data.mechanics || []).find((x) => x.id === id); return m ? m.name : ""; }
+function truckState(id) { return (S.data.truckStates || []).find((t) => t.truck_id === id); }
+function openRepairOf(id) { return (S.data.openRepairs || []).find((r) => r.truck_id === id); }
+function pendingOf(id) { return (S.data.pendingSignoff || []).filter((r) => r.truck_id === id); }
+function issueTitle(i) {
+  const fm = i.failure_modes && i.failure_modes.name;
+  if (fm && fm !== "Lainnya") return fm;
+  return i.description || fm || "(tanpa keterangan)";
+}
+function issuePlace(i) {
+  const pos = POSITION_LABELS[i.component_position] || POSITION_LABELS[i.wheel_position] || "";
+  const cat = i.failure_modes && i.failure_modes.category;
+  return [cat ? cat.replace("_", " ") : "", pos].filter(Boolean).join(" · ");
+}
+function statusChip(status) {
+  if (status === "in_progress") return ["st-work", "Dikerjakan"];
+  if (status === "request_for_parts") return ["st-amber", "Minta part"];
+  if (status === "vendor_selected") return ["st-amber", "Tunggu part"];
+  if (status === "done" || status === "verified") return ["st-done", "Beres"];
+  return ["st-neutral", "Dilaporkan"];
+}
+function isDone(i) { return i.status === "done" || i.status === "verified" || (S.pending && S.pending.key === "issue:" + i.id); }
+function workersOf(r) {
+  const w = new Set([r.marked_done_by_mechanic_id, ...(r.repair_record_issues || []).map((i) => i.done_by_mechanic_id)].filter(Boolean));
+  if (!w.size && r.repaired_by) w.add(r.repaired_by);
+  return w;
+}
+function truckSummary(t) {
+  const r = openRepairOf(t.id);
+  const pend = pendingOf(t.id);
+  if (r) {
+    const issues = r.repair_record_issues || [];
+    const notDone = issues.filter((i) => !isDone(i));
+    const first = notDone[0] || issues[0];
+    let chip;
+    if (!notDone.length) chip = ["st-done", "Siap ditutup"];
+    else if (notDone.some((i) => i.status === "in_progress")) chip = ["st-work", "Dikerjakan"];
+    else if (notDone.some((i) => i.status === "request_for_parts" || i.status === "vendor_selected")) chip = ["st-amber", "Tunggu part"];
+    else chip = ["st-neutral", "Dilaporkan"];
+    const more = issues.length > 1 ? ` · ${issues.length} masalah` : "";
+    return { needs: true, title: first ? issueTitle(first) : "Servis", meta: (first ? issuePlace(first) : "") + more, chip };
+  }
+  if (pend.length) {
+    const who = [...workersOf(pend[0])].map(mechName).filter(Boolean).join(", ");
+    return { needs: true, title: issueTitle((pend[0].repair_record_issues || [])[0] || {}), meta: "Beres" + (who ? " · " + who : ""), chip: ["st-done", "Tunggu dicek"] };
+  }
+  return { needs: false };
+}
+function toCheck() {
+  return (S.data.pendingSignoff || []).filter((r) => S.me && !workersOf(r).has(S.me.id));
+}
+function myWaiting() {
+  return (S.data.pendingSignoff || []).filter((r) => S.me && workersOf(r).has(S.me.id));
+}
+
+// ---------- rendering: shell ----------
+function render() {
+  const app = $("#app");
+  if (S.mode === "tablet" && !S.deviceKey) { app.innerHTML = renderUnregistered(); return; }
+  if ((S.mode === "tablet" || S.mode === "demo") && !S.session) { app.innerHTML = renderLock(); return; }
+  if (!S.data) { app.innerHTML = `<div class="empty-note" style="margin-top:30vh">Memuat…</div>`; return; }
+  app.innerHTML = wide() ? renderWide() : renderNarrow();
+  renderSheet();
+  syncTelegramBack();
+}
+
+function meChip() {
+  if (!S.me) return "";
+  const lock = S.mode === "telegram" ? "" : ` · Kunci`;
+  return `<button class="me-chip" data-act="lock" ${S.mode === "telegram" ? "disabled" : ""}><span class="avatar">${initial(S.me.name)}</span>${esc(S.me.name)}${lock}</button>`;
+}
+
+function renderWide() {
+  const cek = toCheck().length;
+  return `<div class="split">
+    <aside class="side">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:0 4px">
+        <h1 class="large-title">Truk</h1>${meChip()}
+      </div>
+      ${renderTruckList()}
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <button class="btn btn-primary" data-act="lapor">+ Lapor</button>
+        <button class="btn btn-plain" data-act="cek">Cek kerja${cek ? " · " + cek : ""}</button>
+      </div>
+    </aside>
+    <main class="main">${S.view === "cek" ? renderCek() : S.truckId ? renderTruck(S.truckId) : renderWelcome()}</main>
+  </div>`;
+}
+
+function renderNarrow() {
+  const cek = toCheck().length;
+  let body;
+  if (S.view === "truck" && S.truckId) body = `<button class="navback" data-act="back"><svg width="12" height="20" viewBox="0 0 12 20" aria-hidden="true"><path d="M10 2L2 10l8 8" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>Tugas</button>${renderTruck(S.truckId)}`;
+  else if (S.view === "cek") body = renderCek();
+  else body = `<div style="display:flex;align-items:center;justify-content:space-between"><h1 class="large-title">Tugas</h1>${S.mode === "telegram" ? `<span class="avatar">${initial(S.me && S.me.name)}</span>` : meChip()}</div>${renderTruckList()}`;
+  return `<div class="narrow-body">${body}</div>
+  <nav class="tabbar">
+    <button class="${S.view !== "cek" ? "on" : ""}" data-act="tab-tugas"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>Tugas</button>
+    <button data-act="lapor"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v16M4 12h16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>Lapor</button>
+    <button class="${S.view === "cek" ? "on" : ""}" data-act="cek"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12l5 5L20 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>Cek${cek ? `<span class="badge">${cek}</span>` : ""}</button>
+  </nav>`;
+}
+
+function renderWelcome() {
+  const n = (S.data.trucks || []).filter((t) => truckSummary(t).needs).length;
+  return `<div style="margin:auto;text-align:center;max-width:420px" class="stack">
+    <h2 class="large-title">Halo, ${esc(S.me && S.me.name)}</h2>
+    <p class="hint">${n ? `${n} truk perlu dikerjakan. Pilih truknya di kiri.` : "Tidak ada truk yang perlu dikerjakan."}</p>
+    <button class="btn btn-primary" data-act="lapor">+ Lapor masalah</button>
+  </div>`;
+}
+
+function renderTruckList() {
+  const trucks = (S.data.trucks || []).map((t) => ({ t, s: truckSummary(t) }));
+  const work = trucks.filter((x) => x.s.needs);
+  const normal = trucks.filter((x) => !x.s.needs);
+  const list = S.filter === "work" ? work : trucks;
+  const rows = list.map(({ t, s }) => {
+    const st = truckState(t.id);
+    const selected = S.truckId === t.id && (S.view === "truck" || wide());
+    const right = s.needs
+      ? `<span class="pill ${s.chip[0]}">${esc(s.chip[1])}</span>`
+      : `<span class="dot" style="background:${STATE_COLOR[st && st.state] || "#B0A594"}"></span>`;
+    return `<button class="row indent ${selected ? "selected" : ""}" data-act="truck" data-id="${esc(t.id)}">
+      <span class="truck-num">${esc(t.nickname || t.id)}</span>
+      <span class="grow"><span class="title">${s.needs ? esc(s.title) : esc(STATE_LABELS[st && st.state] || "Tidak ada data")}</span><span class="meta">${s.needs ? esc(s.meta) : esc(t.plate || "")}</span></span>
+      ${right}${chevron()}
+    </button>`;
+  }).join("");
+  return `<div class="seg" role="tablist">
+      <button class="${S.filter === "work" ? "on" : ""}" data-act="filter" data-v="work">Perlu kerja · ${work.length}</button>
+      <button class="${S.filter === "all" ? "on" : ""}" data-act="filter" data-v="all">Semua · ${trucks.length}</button>
+    </div>
+    ${list.length ? `<div class="group">${rows}</div>` : `<div class="group"><div class="empty-note">Semua truk jalan normal.</div></div>`}
+    ${S.filter === "work" && normal.length ? `<span class="eyebrow">Jalan normal</span><div class="normal-list">${normal.map(({ t }) => {
+      const st = truckState(t.id);
+      return `<span><span class="dot" style="background:${STATE_COLOR[st && st.state] || "#B0A594"}"></span><b>${esc(t.nickname || t.id)}</b><span class="sub">${esc(STATE_LABELS[st && st.state] || "—")}</span></span>`;
+    }).join("")}</div>` : ""}`;
+}
+
+// ---------- rendering: truck ----------
+function renderTruck(id) {
+  const t = (S.data.trucks || []).find((x) => x.id === id) || { id };
+  const r = openRepairOf(id);
+  const pend = pendingOf(id);
+  const st = truckState(id);
+  const head = `<div class="detail-head">
+    <div class="stack" style="gap:2px">
+      <span class="sub">${esc(t.plate || "")}${r ? ` · Servis <span class="mono">#${esc(r.seq)}</span>` : ""}${st ? " · " + esc(STATE_LABELS[st.state] || st.state) : ""}</span>
+      <h2 class="large-title">Truk ${esc(t.nickname || id)}</h2>
+    </div>
+    ${r ? `<div class="seg" style="min-width:min(420px,100%)">${Object.keys(LOCATION_LABELS).map((k) => `<button class="${r.location === k ? "on" : ""}" data-act="location" data-rid="${esc(r.id)}" data-v="${k}">${LOCATION_LABELS[k]}</button>`).join("")}</div>` : ""}
+  </div>`;
+
+  if (!r && !pend.length) {
+    return `${head}<div class="group"><div class="empty-note">Tidak ada masalah terbuka di truk ini.</div></div>
+      <button class="btn btn-primary" data-act="lapor" data-truck="${esc(id)}">+ Lapor masalah di truk ini</button>`;
+  }
+
+  let out = head;
+  if (r) {
+    const issues = r.repair_record_issues || [];
+    out += `<div class="two-col">${issues.map((i) => renderIssue(r, i)).join("")}</div>`;
+    const allDone = issues.length > 0 && issues.every(isDone);
+    const photos = r.repair_photos || [];
+    out += `<div class="repair-foot">
+      <span class="hint">${allDone ? "Semua masalah beres. Tutup servis ini supaya bisa dicek teman." : `Servis selesai bisa ditekan kalau semua masalah beres.${photos.length ? ` · ${photos.length} foto` : ""}`}</span>
+      <button class="btn btn-soft" data-act="photo" data-rid="${esc(r.id)}">Foto</button>
+      <button class="btn btn-soft" data-act="lapor" data-truck="${esc(id)}">+ Masalah lain</button>
+      ${allDone ? `<button class="btn btn-green" data-act="repair-done" data-rid="${esc(r.id)}" ${S.pending && S.pending.key === "repair:" + r.id ? "disabled" : ""}>Servis selesai</button>` : ""}
+    </div>`;
+  }
+  pend.forEach((p) => {
+    const who = [...workersOf(p)].map(mechName).filter(Boolean).join(", ");
+    out += `<div class="group"><div class="row"><span class="grow"><span class="title">Servis #${esc(p.seq)} beres${who ? " · " + esc(who) : ""}</span><span class="meta">Tunggu dicek mekanik lain</span></span><span class="pill st-done">Tunggu dicek</span></div></div>`;
+  });
+  return out;
+}
+
+function renderIssue(r, i) {
+  const [cls, label] = statusChip(i.status);
+  const pendingDone = S.pending && S.pending.key === "issue:" + i.id;
+  const who = i.done_by_mechanic_id ? " · " + mechName(i.done_by_mechanic_id) : "";
+  const place = issuePlace(i);
+  const title = issueTitle(i);
+  const desc = i.description && i.description !== title ? i.description : "";
+  let actions = "";
+  if (pendingDone) {
+    actions = `<div class="hint">Disimpan sebagai beres…</div>`;
+  } else if (i.status === "reported" || i.status === "diagnosed") {
+    actions = `<div class="issue-actions">
+      <button class="btn btn-primary" data-act="start" data-rid="${esc(r.id)}" data-iid="${esc(i.id)}">Mulai kerja</button>
+      <button class="btn btn-soft" data-act="parts" data-rid="${esc(r.id)}" data-iid="${esc(i.id)}">Butuh part</button>
+      <button class="btn btn-soft" data-act="edit" data-iid="${esc(i.id)}">Ubah</button>
+    </div>`;
+  } else if (i.status === "request_for_parts") {
+    actions = `<div class="hint">Menunggu part: <b>${esc(i.parts_used || "—")}</b>. Staff yang pilih belinya.</div>
+      <div class="issue-actions"><button class="btn btn-soft full" data-act="parts" data-rid="${esc(r.id)}" data-iid="${esc(i.id)}">Tambah part</button></div>`;
+  } else if (i.status === "vendor_selected") {
+    const q = (i.vendor_quotes || []).find((x) => x.is_selected && x.approved_by_owner);
+    actions = q
+      ? `<div class="hint">Part dari ${esc(q.vendor_name)} sudah disetujui.</div><div class="issue-actions"><button class="btn btn-primary" data-act="arrived" data-iid="${esc(i.id)}">Part sudah sampai — mulai</button></div>`
+      : `<div class="hint">Menunggu persetujuan pemilik untuk part${i.parts_used ? `: <b>${esc(i.parts_used)}</b>` : ""}.</div>`;
+  } else if (i.status === "in_progress") {
+    actions = `<div class="issue-actions">
+      <button class="btn btn-primary" data-act="issue-done" data-iid="${esc(i.id)}">Sudah beres</button>
+      <button class="btn btn-soft" data-act="photo" data-rid="${esc(r.id)}">Foto</button>
+      <button class="btn btn-soft" data-act="parts" data-rid="${esc(r.id)}" data-iid="${esc(i.id)}">Butuh part lagi</button>
+    </div>`;
+  }
+  return `<article class="issue-card ${i.status === "in_progress" && !pendingDone ? "work" : ""} ${pendingDone ? "pending" : ""}">
+    <div class="issue-top"><span class="pill ${pendingDone ? "st-done" : cls}">${pendingDone ? "Beres" : esc(label)}${i.status === "done" || i.status === "verified" ? esc(who) : ""}</span><span class="sub">${esc(place)}</span></div>
+    <h3 class="issue-title">${esc(title)}</h3>
+    ${desc ? `<div class="issue-desc">${esc(desc)}</div>` : ""}
+    ${i.parts_used && i.status !== "request_for_parts" && i.status !== "vendor_selected" ? `<div class="sub">Part: ${esc(i.parts_used)}</div>` : ""}
+    ${actions}
+  </article>`;
+}
+
+// ---------- rendering: cek ----------
+function renderCek() {
+  const list = toCheck();
+  const mine = myWaiting();
+  const card = (r, canSign) => {
+    const who = [...workersOf(r)].map(mechName).filter(Boolean).join(", ") || "mekanik";
+    const photos = r.repair_photos || [];
+    const pendingSign = S.pending && S.pending.key === "sign:" + r.id;
+    return `<article class="issue-card">
+      <div class="issue-top"><span class="pill st-done">Beres · ${esc(who)}</span><span class="sub">Truk ${esc(r.truck_id)} · Servis <span class="mono">#${esc(r.seq)}</span></span></div>
+      <div class="group">${(r.repair_record_issues || []).map((i) => `<div class="row"><span class="grow"><span class="title">${esc(issueTitle(i))}</span><span class="meta">${esc([issuePlace(i), i.parts_used ? "Part: " + i.parts_used : ""].filter(Boolean).join(" · "))}</span></span></div>`).join("")}</div>
+      <div class="sub">${photos.length ? `${photos.length} foto: ${photos.map((p, n) => `<a href="${esc(p.url)}" target="_blank" rel="noopener">${p.phase === "after" ? "sesudah" : "sebelum"} ${n + 1}</a>`).join(" · ")}` : "Belum ada foto."}</div>
+      ${canSign ? (pendingSign ? `<div class="hint">Disimpan sebagai sudah dicek…</div>` : `<button class="btn btn-green btn-block" style="min-height:60px" data-act="sign" data-rid="${esc(r.id)}">Sudah saya cek — OK</button>
+      <div class="hint">Ada yang kurang? Bilang langsung ke ${esc(who)} atau Farman — jangan dikonfirmasi dulu.</div>`) : `<div class="hint">Tunggu dicek mekanik lain.</div>`}
+    </article>`;
+  };
+  return `<div class="stack" style="gap:16px">
+    <h2 class="large-title">Cek kerja teman</h2>
+    ${list.length ? list.map((r) => card(r, true)).join("") : `<div class="group"><div class="empty-note">Tidak ada kerjaan yang perlu kamu cek.</div></div>`}
+    ${mine.length ? `<span class="eyebrow">Kerja kamu, tunggu dicek</span>${mine.map((r) => card(r, false)).join("")}` : ""}
+    <p class="hint">Kerjaan sendiri tidak bisa kamu cek sendiri — itu tugas mekanik lain.</p>
+  </div>`;
+}
+
+// ---------- rendering: lock / setup ----------
+function renderUnregistered() {
+  return `<div class="stack" style="max-width:520px;margin:18vh auto;padding:0 24px;text-align:center">
+    <h1 class="large-title">Bengkel SKL</h1>
+    <p class="hint">Tablet ini belum terdaftar. Buka link pendaftaran dari Yohanes sekali di tablet ini. Di HP, buka lewat bot SKL Lapangan di Telegram.</p>
+  </div>`;
+}
+
+function renderLock() {
+  const L = S.lock;
+  const mech = L.mechanics.find((m) => m.id === L.pick);
+  const creating = mech && !mech.has_pin;
+  const target = creating && L.creating ? "Ulangi PIN baru" : creating ? "Buat PIN baru (4 angka)" : mech ? "PIN " + esc(mech.name) : "Pilih nama dulu";
+  const dots = [0, 1, 2, 3].map((n) => `<span class="${L.pin.length > n ? "f" : ""}"></span>`).join("");
+  const keys = [1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => `<button data-act="pin" data-v="${n}" ${mech ? "" : "disabled"}>${n}</button>`).join("");
+  return `<div class="lock">
+    <div class="lock-left">
+      <div class="stack" style="gap:8px"><span class="eyebrow">Bengkel SKL · Pool Serang</span><h1 class="large-title" style="font-size:48px">Siapa yang kerja?</h1></div>
+      <div class="group">${L.mechanics.map((m) => `<button class="row ${L.pick === m.id ? "selected" : ""}" data-act="who" data-id="${esc(m.id)}" style="min-height:92px">
+        <span class="avatar ${L.pick === m.id ? "" : "alt"}" style="width:56px;height:56px;border-radius:28px;font-size:24px">${initial(m.name)}</span>
+        <span class="grow"><span class="title" style="font-size:22px">${esc(m.name)}</span><span class="meta">${m.has_pin ? "Masukkan PIN" : "Belum punya PIN — buat sekarang"}</span></span>${chevron(L.pick === m.id ? "#8B1A1A" : "#B0A594")}
+      </button>`).join("") || `<div class="empty-note">Memuat…</div>`}</div>
+      <span class="hint">Terkunci sendiri setelah 2 menit tidak disentuh.</span>
+    </div>
+    <div class="lock-right">
+      <div class="stack" style="align-items:center;gap:16px">
+        <span style="font-size:20px;font-weight:600">${target}</span>
+        <div class="pin-dots ${L.error ? "shake" : ""}">${dots}</div>
+        <span class="sub" style="min-height:20px;color:${L.error ? "var(--red)" : "var(--muted)"}">${esc(L.error)}</span>
+      </div>
+      <div class="pad">${keys}<span></span><button data-act="pin" data-v="0" ${mech ? "" : "disabled"}>0</button><button class="txt" data-act="pin-del" aria-label="Hapus angka">Hapus</button></div>
+    </div>
+  </div>`;
+}
+
+async function loadLockList() {
+  try {
+    const { mechanics } = await api("tablet_mechanics");
+    S.lock.mechanics = mechanics || [];
+    if (S.lock.mechanics.length === 1) S.lock.pick = S.lock.mechanics[0].id;
+  } catch (e) { S.lock.error = e.message; }
+  render();
+}
+
+async function pinDigit(d) {
+  const L = S.lock;
+  if (L.pin.length >= 4) return;
+  L.pin += d; L.error = "";
+  render();
+  if (L.pin.length < 4) return;
+  const mech = L.mechanics.find((m) => m.id === L.pick);
+  if (!mech) return;
+  if (!mech.has_pin) {
+    if (!L.creating) { L.creating = L.pin; L.pin = ""; render(); return; }
+    if (L.creating !== L.pin) { L.creating = null; L.pin = ""; L.error = "PIN tidak sama. Ulangi."; render(); return; }
+    try { await api("create_pin", { mechanic_id: mech.id, pin: L.pin }); mech.has_pin = true; }
+    catch (e) { L.creating = null; L.pin = ""; L.error = e.message; render(); return; }
+  }
+  try {
+    const out = await api("pin_login", { mechanic_id: mech.id, pin: L.pin });
+    S.session = out.sessionToken; S.me = out.mechanic;
+    L.pin = ""; L.creating = null; L.error = "";
+    touch();
+    render();
+    await load();
+  } catch (e) {
+    L.pin = ""; L.error = e.message; render();
+  }
+}
+
+// ---------- auto-lock (tablet) ----------
+let idleTimer = null;
+function touch() {
+  if (S.mode === "telegram" || !S.session) return;
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => lockNow(false), LOCK_AFTER_MS);
+}
+function lockNow(expired) {
+  flushPending();
+  if (S.session && !expired && S.mode === "tablet") api("logout").catch(() => {});
+  S.session = null; S.me = null; S.data = null; S.sheet = null;
+  S.view = "board"; S.truckId = null;
+  S.lock.pin = ""; S.lock.creating = null; S.lock.pick = null;
+  S.lock.error = expired ? "Sesi habis. Masukkan PIN lagi." : "";
+  clearTimeout(idleTimer);
+  render();
+  loadLockList();
+}
+
+// ---------- undo: commit after 10 s unless cancelled ----------
+function later(key, label, run) {
+  flushPending();
+  const p = { key, label, run, timer: null };
+  p.timer = setTimeout(() => commitPending(p), UNDO_MS);
+  S.pending = p;
+  toast(label, true);
+  render();
+}
+async function commitPending(p) {
+  if (S.pending !== p) return;
+  S.pending = null;
+  clearTimeout(p.timer);
+  try { await p.run(); haptic("success"); }
+  catch (e) { toast("Gagal: " + e.message); }
+  load().catch(() => {});
+}
+function flushPending() { if (S.pending) commitPending(S.pending); }
+$("#toast-undo").addEventListener("click", () => {
+  if (!S.pending) return;
+  clearTimeout(S.pending.timer);
+  S.pending = null;
+  $("#toast").classList.remove("show");
+  render();
+});
+window.addEventListener("pagehide", flushPending);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flushPending(); });
+
+// ---------- actions ----------
+async function run(fn, okMsg) {
+  try {
+    await fn();
+    if (okMsg) { toast(okMsg); haptic("success"); }
+    await load();
+  } catch (e) { toast("Gagal: " + e.message); haptic("error"); }
+}
+
+document.addEventListener("click", async (ev) => {
+  const el = ev.target.closest("[data-act]");
+  touch();
+  if (!el || el.disabled) return;
+  // The backdrop closes the sheet only when it is itself what was tapped,
+  // not when a tap inside the sheet bubbles up to it.
+  if (el.dataset.act === "sheet-bg" && ev.target !== el) return;
+  const a = el.dataset.act;
+  const d = el.dataset;
+  switch (a) {
+    case "lock": if (S.mode !== "telegram") lockNow(false); return;
+    case "who": S.lock.pick = d.id; S.lock.pin = ""; S.lock.creating = null; S.lock.error = ""; render(); return;
+    case "pin": pinDigit(d.v); return;
+    case "pin-del": S.lock.pin = S.lock.pin.slice(0, -1); render(); return;
+    case "filter": S.filter = d.v; render(); return;
+    case "truck": S.truckId = d.id; S.view = "truck"; render(); window.scrollTo(0, 0); return;
+    case "back": S.view = "board"; render(); return;
+    case "tab-tugas": S.view = S.truckId && wide() ? "truck" : "board"; render(); return;
+    case "cek": S.view = "cek"; render(); window.scrollTo(0, 0); return;
+    case "lapor": openLapor(d.truck || (wide() && S.truckId) || null); return;
+    case "location": {
+      const r = (S.data.openRepairs || []).find((x) => x.id === d.rid);
+      if (!r || r.location === d.v) return;
+      run(() => api("update_location", { id: d.rid, location: d.v }), "Lokasi: " + LOCATION_LABELS[d.v]);
+      return;
+    }
+    case "start": run(() => api("request_parts", { repair_record_id: d.rid, issues: [{ id: d.iid, parts_used: "" }] }), "Mulai dikerjakan."); return;
+    case "arrived": run(() => api("start_progress_from_vendor", { id: d.iid }), "Mulai dikerjakan."); return;
+    case "issue-done": later("issue:" + d.iid, "Ditandai beres.", () => api("mark_issue_done", { id: d.iid })); return;
+    case "repair-done": later("repair:" + d.rid, "Servis ditutup, tunggu dicek teman.", () => api("mark_done", { id: d.rid })); return;
+    case "sign": later("sign:" + d.rid, "Dicek OK.", () => api("sign_off", { id: d.rid })); return;
+    case "parts": openParts(d.rid, d.iid); return;
+    case "edit": openEdit(d.iid); return;
+    case "photo": pickPhoto(d.rid); return;
+    default: sheetAction(a, el); // sheet-level actions
+  }
+});
+document.addEventListener("pointerdown", touch, { passive: true });
+window.addEventListener("resize", () => { if (S.data) render(); });
+
+// ---------- photos ----------
+const MAX_VIDEO_BYTES = 15 * 1024 * 1024;
+let photoRepair = null;
+function pickPhoto(rid) { photoRepair = rid; $("#photo-input").value = ""; $("#photo-input").click(); }
+function fileToBase64(file) {
+  return new Promise((ok, bad) => { const r = new FileReader(); r.onerror = () => bad(new Error("Gagal membaca file")); r.onload = () => ok(String(r.result).split(",")[1]); r.readAsDataURL(file); });
+}
+function resizeImageToBase64(file, maxDim, quality) {
+  return new Promise((ok, bad) => {
+    const im = new Image(); const r = new FileReader();
+    r.onerror = () => bad(new Error("Gagal membaca file"));
+    r.onload = () => {
+      im.onerror = () => bad(new Error("Gagal memuat gambar"));
+      im.onload = () => {
+        let { width, height } = im;
+        if (width > maxDim || height > maxDim) { const s = maxDim / Math.max(width, height); width = Math.round(width * s); height = Math.round(height * s); }
+        const c = document.createElement("canvas"); c.width = width; c.height = height;
+        c.getContext("2d").drawImage(im, 0, 0, width, height);
+        ok(c.toDataURL("image/jpeg", quality).split(",")[1]);
+      };
+      im.src = r.result;
+    };
+    r.readAsDataURL(file);
+  });
+}
+$("#photo-input").addEventListener("change", async (ev) => {
+  const file = ev.target.files && ev.target.files[0];
+  if (!file || !photoRepair) return;
+  const isVideo = file.type.startsWith("video/");
+  if (isVideo && file.size > MAX_VIDEO_BYTES) { toast("Video terlalu besar (maks 15 MB). Ambil video lebih pendek."); return; }
+  toast("Mengunggah…");
+  run(async () => {
+    const b64 = isVideo ? await fileToBase64(file) : await resizeImageToBase64(file, 1600, 0.8);
+    await api("upload_photo", { repair_record_id: photoRepair, media_type: isVideo ? "video" : "photo", filename: file.name || (isVideo ? "video.mp4" : "foto.jpg"), content_base64: b64 });
+  }, "Foto tersimpan.");
+});
+
+// ---------- sheets ----------
+function closeSheet() { S.sheet = null; renderSheet(); }
+function renderSheet() {
+  const root = $("#sheet-root");
+  if (!S.sheet || !S.data) { root.innerHTML = ""; return; }
+  const s = S.sheet;
+  const body = s.type === "lapor" ? laporView(s) : s.type === "parts" ? partsView(s) : editView(s);
+  // Animate only when the sheet opens -- every tap inside re-renders it, and
+  // replaying the slide-up each time reads as flicker.
+  const first = !s.shown;
+  s.shown = true;
+  const keepScroll = root.querySelector(".sheet-body");
+  const scrollTop = keepScroll ? keepScroll.scrollTop : 0;
+  root.innerHTML = `<div class="sheet-backdrop ${first ? "anim" : ""}" data-act="sheet-bg"><div class="sheet" role="dialog" aria-modal="true">${body}</div></div>`;
+  const nb = root.querySelector(".sheet-body");
+  if (nb && !first) nb.scrollTop = scrollTop;
+  const ta = root.querySelector("textarea[data-bind]");
+  if (ta && s.focus === ta.dataset.bind) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+}
+function sheetHead(title, right = "") {
+  return `<div class="sheet-head"><button data-act="sheet-close">Batal</button><span class="t">${title}</span><span style="justify-self:end">${right}</span></div>`;
+}
+document.addEventListener("input", (ev) => {
+  const el = ev.target;
+  if (!S.sheet || !el.dataset || !el.dataset.bind) return;
+  S.sheet[el.dataset.bind] = el.value;
+  S.sheet.focus = el.dataset.bind;
+  if (el.dataset.bind === "desc" && S.sheet.type === "lapor") suggestFromText();
+  if (el.dataset.bind === "rdate" || el.dataset.bind === "rnotes") return;
+});
+
+// ----- Lapor (report a problem / routine service) -----
+function openLapor(truckId) {
+  S.sheet = { type: "lapor", tab: "masalah", truckId, zone: null, group: null, page: 0, pick: null, pop: null, all: false, allCat: null, desc: "", loc: "pool", suggestion: null, rItem: null, rDate: new Date().toISOString().slice(0, 10), rQty: 0, rNotes: "", rLast: null };
+  renderSheet();
+}
+function newIssueModes(cats) {
+  return (S.data.failureModes || []).filter((f) => !ROUTINE_FM_NAMES.includes(f.name) && (!cats || cats.includes(f.category)));
+}
+function openIssuesOnTruck(truckId) {
+  const r = truckId && openRepairOf(truckId);
+  return r ? (r.repair_record_issues || []).filter((i) => !isDone(i)) : [];
+}
+function laporView(s) {
+  const tabs = `<div class="seg" style="max-width:420px;margin:0 auto 16px"><button class="${s.tab === "masalah" ? "on" : ""}" data-act="l-tab" data-v="masalah">Masalah</button><button class="${s.tab === "rutin" ? "on" : ""}" data-act="l-tab" data-v="rutin">Servis rutin</button></div>`;
+  // Once a truck is chosen the row folds away (it would push the photo below
+  // the fold on a landscape tablet); "Ganti" in the path brings it back.
+  const chipRow = `<span class="eyebrow">Truk</span><div class="chips" style="margin:6px 0 16px">${(S.data.trucks || []).map((t) => `<button class="chip num ${s.truckId === t.id ? "on" : ""}" data-act="l-truck" data-id="${esc(t.id)}">${esc(t.nickname || t.id)}</button>`).join("")}</div>`;
+  const trucks = s.truckId && !s.pickTruck ? "" : chipRow;
+  if (s.tab === "rutin") return sheetHead("Servis rutin") + `<div class="sheet-body">${tabs}${chipRow}${rutinBody(s)}</div>${rutinFoot(s)}`;
+  const t = (S.data.trucks || []).find((x) => x.id === s.truckId);
+  const title = t ? "Lapor · Truk " + esc(t.nickname || t.id) : "Lapor masalah";
+  return sheetHead(title) + `<div class="sheet-body">${tabs}${trucks}${s.truckId ? `<div class="lapor-grid">${photoPane(s)}${listPane(s)}</div>` : `<div class="hint">Pilih truknya dulu.</div>`}</div>${laporFoot(s)}`;
+}
+
+function photoPane(s) {
+  const tname = (() => { const t = (S.data.trucks || []).find((x) => x.id === s.truckId); return t ? "Truk " + (t.nickname || t.id) : ""; })();
+  const openIs = openIssuesOnTruck(s.truckId);
+  if (!s.group) {
+    const spots = ZONES.map((z) => {
+      const n = openIs.filter((i) => z.cats.includes(i.failure_modes && i.failure_modes.category)).length;
+      return `<button class="spot zone ${n ? "open" : ""} ${s.zone === z.key ? "sel" : ""}" style="left:${z.left}%;top:${z.top}%" data-act="l-zone" data-v="${z.key}">${n ? `<span class="n">${n}</span>` : ""}${esc(z.label)}</button>`;
+    }).join("");
+    return `<div class="stack"><div class="crumbs"><b>${esc(tname)}</b><button data-act="l-ganti">Ganti</button><span class="sep">›</span><span class="sub">Tekan bagian truk</span></div>
+      <div class="photo"><img src="${img("truck-side.jpg")}" alt="Truk tampak samping">${spots}</div>
+      <span class="hint">Angka = masalah yang masih terbuka di bagian itu. Cubit layar untuk zoom.</span></div>`;
+  }
+  const zone = ZONES.find((z) => z.key === s.zone);
+  const pages = GROUPS[s.group];
+  const page = pages[s.page] || pages[0];
+  const openAt = (id) => openIs.filter((i) => i.component_position === id || i.wheel_position === id).length;
+  const thumbs = pages.length > 1 ? `<div class="thumbs">${pages.map((p, n) => {
+    const cnt = (p.parts || []).reduce((a, x) => a + (x.id ? openAt(x.id) : 0), 0) + (p.wheels || []).reduce((a, w) => a + openAt(w.code), 0);
+    return `<button class="thumb ${n === s.page ? "on" : ""}" data-act="l-page" data-v="${n}"><img src="${img(p.src)}" alt=""><span>${esc(p.title)}${cnt ? " · " + cnt : ""}</span></button>`;
+  }).join("")}</div>` : "";
+  const spots = (page.parts || []).map((p, n) => {
+    const c = p.id ? openAt(p.id) : 0;
+    const sel = s.pick && ((p.id && s.pick.component_position === p.id) || (!p.id && s.pick.fmName === p.fm));
+    return `<button class="spot ${c ? "open" : ""} ${sel ? "sel" : ""}" style="left:${p.left}%;top:${p.top}%" data-act="l-part" data-v="${n}">${c ? `<span class="n">${c}</span>` : ""}${esc(p.label)}</button>`;
+  }).join("") + (page.wheels || []).map((w, n) => {
+    const c = openAt(w.code);
+    const sel = s.pick && s.pick.wheel_position === w.code;
+    return `<button class="spot ${c ? "open" : ""} ${sel ? "sel" : ""}" style="left:${w.left}%;top:${w.top}%" data-act="l-wheel" data-v="${n}">${w.num}</button>`;
+  }).join("");
+  const pop = s.pop ? `<div class="pop"><div class="h"><span>${esc(s.pop.title)} — apa masalahnya?</span><button class="linkbtn" data-act="l-pop-close" aria-label="Tutup">Tutup</button></div>${s.pop.choices.map((c, n) => fmByName(c) ? `<button class="choice" data-act="l-pop-pick" data-v="${n}">${esc(c)}</button>` : "").join("")}</div>` : "";
+  return `<div class="stack"><div class="crumbs"><button data-act="l-up">${esc(tname)}</button><span class="sep">›</span><b>${esc(zone ? zone.label : "")}</b>${pages.length > 1 ? `<span class="sep">›</span><span class="sub">${esc(page.title)}</span>` : ""}</div>
+    ${thumbs}<div class="photo"><img src="${img(page.src)}" alt="${esc(page.title)}">${spots}${pop}</div></div>`;
+}
+
+function listPane(s) {
+  const openIs = openIssuesOnTruck(s.truckId);
+  const zone = ZONES.find((z) => z.key === s.zone);
+  const r = openRepairOf(s.truckId);
+  let html = "";
+  const zoneOpen = zone ? openIs.filter((i) => zone.cats.includes(i.failure_modes && i.failure_modes.category)) : openIs;
+  if (zoneOpen.length) {
+    html += `<span class="eyebrow">${zone ? esc(zone.label) + " · " : ""}Masih terbuka</span><div class="group">${zoneOpen.map((i) => `<button class="row selected" data-act="l-existing"><span class="grow"><span class="title">${esc(issueTitle(i))}</span><span class="meta" style="color:var(--accent)">${esc(issuePlace(i) || "")} — sudah dilaporkan, buka</span></span>${chevron("#8B1A1A")}</button>`).join("")}</div>`;
+  }
+  if (s.all || !zone) {
+    const cats = [...new Set(newIssueModes().map((f) => f.category))];
+    const cat = s.allCat || (zone ? zone.cats[0] : null);
+    if (!zone && !s.all) {
+      html += `<span class="eyebrow">Atau pilih bagian</span><div class="group">${ZONES.map((z) => `<button class="row" data-act="l-zone" data-v="${z.key}"><span class="grow"><span class="title">${esc(z.label)}</span></span>${chevron()}</button>`).join("")}</div>
+        <button class="btn btn-plain btn-block" data-act="l-all">Tidak ada di gambar — lihat semua</button>`;
+      return `<div class="stack">${html}</div>`;
+    }
+    html += `<span class="eyebrow">Semua jenis masalah</span><div class="chips">${cats.map((c) => `<button class="chip ${c === cat ? "on" : ""}" style="min-height:40px;font-size:14px" data-act="l-allcat" data-v="${esc(c)}">${esc(c.replace("_", " "))}</button>`).join("")}</div>`;
+    html += fmList(newIssueModes(cat ? [cat] : null), s);
+    return `<div class="stack">${html}</div>`;
+  }
+  html += `<span class="eyebrow">${s.group ? "Di foto ini" : "Pilih langsung"}</span>`;
+  if (s.group) {
+    const page = GROUPS[s.group][s.page] || GROUPS[s.group][0];
+    html += `<div class="group">${(page.parts || []).map((p, n) => {
+      const sel = s.pick && ((p.id && s.pick.component_position === p.id) || (!p.id && s.pick.fmName === p.fm && !s.pick.component_position));
+      const sub = p.routine ? "Servis rutin — catat ganti" : p.brake ? "Rem — pilih masalahnya" : p.fm;
+      return `<button class="row ${sel ? "selected" : ""}" data-act="l-part" data-v="${n}"><span class="grow"><span class="title">${esc(p.label)}</span><span class="meta">${esc(sub)}</span></span>${chevron()}</button>`;
+    }).join("")}${(page.wheels || []).length ? `<div class="row"><span class="grow"><span class="meta">Tekan nomor roda di foto.</span></span></div>` : ""}</div>`;
+  } else {
+    html += fmList(newIssueModes(zone.cats), s);
+    if (zone.group) html += `<button class="btn btn-dark btn-block" data-act="l-into">Tunjuk di foto ${esc(zone.label.toLowerCase())} ›</button>`;
+  }
+  html += `<button class="btn btn-plain btn-block" data-act="l-all">Tidak ada di gambar</button>`;
+  if (!r) html += `<span class="eyebrow">Lokasi truk</span><div class="seg">${Object.keys(LOCATION_LABELS).map((k) => `<button class="${s.loc === k ? "on" : ""}" data-act="l-loc" data-v="${k}">${LOCATION_LABELS[k]}</button>`).join("")}</div>`;
+  html += `<span class="eyebrow">Catatan (boleh pakai mic di keyboard)</span><textarea class="field" data-bind="desc" placeholder="mis. selang putus, sementara disumbat">${esc(s.desc)}</textarea>`;
+  if (s.suggestion && (!s.pick || s.pick.fmId !== s.suggestion.id)) html += `<div class="suggest">Mungkin: <b>${esc(s.suggestion.name)}</b><button data-act="l-suggest">Pakai</button></div>`;
+  return `<div class="stack">${html}</div>`;
+}
+function fmList(list, s) {
+  return `<div class="group">${list.map((f) => {
+    const sel = s.pick && s.pick.fmId === f.id && !s.pick.component_position && !s.pick.wheel_position;
+    return `<button class="row ${sel ? "selected" : ""}" data-act="l-fm" data-id="${esc(f.id)}"><span class="grow"><span class="title" style="font-weight:${sel ? 600 : 500}">${esc(f.name)}</span></span>${sel ? `<svg width="20" height="16" viewBox="0 0 22 18" aria-label="dipilih"><path d="M2 9l6 6L20 3" fill="none" stroke="#8B1A1A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>` : ""}</button>`;
+  }).join("") || `<div class="empty-note">Tidak ada.</div>`}</div>`;
+}
+function laporFoot(s) {
+  const t = (S.data.trucks || []).find((x) => x.id === s.truckId);
+  const r = s.truckId && openRepairOf(s.truckId);
+  const ok = t && s.pick && s.pick.fmId;
+  const needsDesc = s.pick && fmById(s.pick.fmId) && fmById(s.pick.fmId).name === "Lainnya" && !s.desc.trim();
+  const sum = ok ? `<b>Truk ${esc(t.nickname || t.id)}</b> · ${esc(s.pick.label)}${r ? " · ditambahkan ke servis #" + esc(r.seq) : " · " + LOCATION_LABELS[s.loc]}` : t ? "Pilih masalahnya di foto atau di daftar." : "Pilih truk.";
+  return `<div class="sheet-foot"><span class="summary">${sum}${needsDesc ? " — tulis catatannya dulu" : ""}</span><button class="btn btn-primary" style="min-width:220px;min-height:60px" data-act="l-save" ${ok && !needsDesc ? "" : "disabled"}>Simpan laporan</button></div>`;
+}
+
+function rutinBody(s) {
+  const item = ROUTINE_ITEMS.find((i) => i.type === s.rItem);
+  return `<div class="two-col"><div class="stack">
+    <span class="eyebrow">Apa yang diganti</span>
+    <div class="group">${ROUTINE_ITEMS.map((i) => `<button class="row ${s.rItem === i.type ? "selected" : ""}" data-act="r-item" data-v="${i.type}"><span class="grow"><span class="title">${esc(i.label)}</span>${s.rItem === i.type && s.rLast !== null ? `<span class="meta">${esc(s.rLast || "Belum pernah dicatat untuk truk ini.")}</span>` : ""}</span></button>`).join("")}</div>
+  </div><div class="stack">
+    <span class="eyebrow">Tanggal</span><input class="field" type="date" data-bind="rDate" value="${esc(s.rDate)}">
+    ${item && item.unit ? `<span class="eyebrow">Jumlah (${item.unit})</span><div class="row" style="border-radius:var(--r)"><span class="grow"><span class="title">${s.rQty || 0} ${item.unit}</span></span><div class="seg" style="grid-auto-columns:64px"><button data-act="r-qty" data-v="-1" aria-label="Kurangi">−</button><button data-act="r-qty" data-v="1" aria-label="Tambah">+</button></div></div>` : ""}
+    <span class="eyebrow">Catatan</span><textarea class="field" data-bind="rNotes" placeholder="opsional">${esc(s.rNotes)}</textarea>
+  </div></div>`;
+}
+function rutinFoot(s) {
+  const t = (S.data.trucks || []).find((x) => x.id === s.truckId);
+  const item = ROUTINE_ITEMS.find((i) => i.type === s.rItem);
+  const ok = t && item;
+  return `<div class="sheet-foot"><span class="summary">${ok ? `<b>Truk ${esc(t.nickname || t.id)}</b> · ${esc(item.label)} · ${esc(s.rDate)}` : "Pilih truk dan yang diganti."}</span><button class="btn btn-primary" style="min-width:220px;min-height:60px" data-act="r-save" ${ok ? "" : "disabled"}>Catat</button></div>`;
+}
+
+let suggestTimer = null;
+function suggestFromText() {
+  clearTimeout(suggestTimer);
+  const s = S.sheet;
+  const text = (s.desc || "").trim();
+  if (text.length < 4) { if (s.suggestion) { s.suggestion = null; } return; }
+  suggestTimer = setTimeout(async () => {
+    try {
+      const { failure_mode_id, confidence } = await api("classify_failure_mode", { description: text });
+      if (S.sheet !== s) return;
+      const f = failure_mode_id && confidence !== "none" ? fmById(failure_mode_id) : null;
+      const changed = (f && f.id) !== (s.suggestion && s.suggestion.id);
+      s.suggestion = f ? { id: f.id, name: f.name } : null;
+      if (changed) renderSheet();
+    } catch (e) { /* a suggestion never blocks anything */ }
+  }, 900);
+}
+
+async function loadRoutineLast(s) {
+  if (!s.truckId || !s.rItem) return;
+  s.rLast = null;
+  try {
+    const { latestByItem } = await api("list_routine_maintenance", { truck_id: s.truckId });
+    const log = latestByItem && latestByItem[s.rItem];
+    s.rLast = log ? `Terakhir ${log.performed_at} oleh ${log.performed_by}${log.quantity ? ` (${log.quantity} ${log.unit || ""})` : ""}` : "";
+  } catch (e) { s.rLast = ""; }
+  if (S.sheet === s) renderSheet();
+}
+
+// ----- parts request -----
+function openParts(rid, iid) {
+  const r = (S.data.openRepairs || []).find((x) => x.id === rid);
+  const i = r && (r.repair_record_issues || []).find((x) => x.id === iid);
+  if (!i) return;
+  S.sheet = { type: "parts", rid, iid, cat: i.failure_modes && i.failure_modes.category, title: issueTitle(i), items: {}, other: "" };
+  renderSheet();
+}
+function partsView(s) {
+  const sugg = PART_SUGGESTIONS[s.cat] || ["Baut", "Klem", "Selang"];
+  const names = [...new Set([...sugg, ...Object.keys(s.items)])];
+  const rows = names.map((n) => {
+    const q = s.items[n] || 0;
+    return `<div class="row"><span class="grow"><span class="title" style="font-weight:${q ? 600 : 500}">${esc(n)}</span></span>
+      <div class="seg" style="grid-auto-columns:60px"><button data-act="p-qty" data-n="${esc(n)}" data-v="-1" aria-label="Kurangi" ${q ? "" : "disabled"}>−</button><button class="${q ? "on" : ""}" disabled style="opacity:1">${q}</button><button data-act="p-qty" data-n="${esc(n)}" data-v="1" aria-label="Tambah">+</button></div></div>`;
+  }).join("");
+  const picked = Object.entries(s.items).filter(([, q]) => q > 0);
+  return sheetHead("Butuh part apa?") + `<div class="sheet-body"><div class="two-col"><div class="stack">
+      <span class="eyebrow">${esc(s.title)}</span><div class="group">${rows}</div>
+    </div><div class="stack">
+      <span class="eyebrow">Part lain</span>
+      <div style="display:flex;gap:8px"><input class="field" data-bind="other" placeholder="nama part (boleh pakai mic)" value="${esc(s.other)}"><button class="btn btn-soft" data-act="p-add">Tambah</button></div>
+      <p class="hint">Kamu cukup sebut part yang dibutuhkan. Beli di mana dan pakai stok atau tidak, staff yang putuskan.</p>
+    </div></div></div>
+    <div class="sheet-foot"><span class="summary">${picked.length ? picked.map(([n, q]) => `<b>${esc(n)}</b> ×${q}`).join(", ") : "Pilih part yang dibutuhkan."}</span><button class="btn btn-primary" style="min-width:220px;min-height:60px" data-act="p-send" ${picked.length ? "" : "disabled"}>Kirim permintaan</button></div>`;
+}
+
+// ----- edit an issue -----
+function openEdit(iid) {
+  const r = (S.data.openRepairs || []).find((x) => (x.repair_record_issues || []).some((i) => i.id === iid));
+  const i = r && r.repair_record_issues.find((x) => x.id === iid);
+  if (!i) return;
+  const cat = i.failure_modes && i.failure_modes.category;
+  S.sheet = { type: "edit", iid, count: r.repair_record_issues.length, fmId: i.failure_mode_id, cat: cat || null, desc: i.description || "" };
+  renderSheet();
+}
+function editView(s) {
+  const cats = [...new Set((S.data.failureModes || []).map((f) => f.category))];
+  const list = (S.data.failureModes || []).filter((f) => !s.cat || f.category === s.cat);
+  return sheetHead("Ubah masalah") + `<div class="sheet-body"><div class="two-col"><div class="stack">
+      <span class="eyebrow">Jenis masalah</span>
+      <div class="chips">${cats.map((c) => `<button class="chip ${c === s.cat ? "on" : ""}" style="min-height:40px;font-size:14px" data-act="e-cat" data-v="${esc(c)}">${esc(c.replace("_", " "))}</button>`).join("")}</div>
+      ${fmList(list, { pick: { fmId: s.fmId } })}
+    </div><div class="stack">
+      <span class="eyebrow">Catatan</span><textarea class="field" data-bind="desc">${esc(s.desc)}</textarea>
+      ${s.count > 1 ? `<button class="btn btn-plain" data-act="e-del" style="color:var(--red)">Hapus masalah ini (salah lapor)</button>` : `<p class="hint">Ini satu-satunya masalah di servis ini, jadi tidak bisa dihapus.</p>`}
+    </div></div></div>
+    <div class="sheet-foot"><span class="summary">Posisi di truk tidak berubah.</span><button class="btn btn-primary" style="min-width:220px;min-height:60px" data-act="e-save">Simpan</button></div>`;
+}
+
+// ----- sheet actions -----
+function sheetAction(a, el) {
+  const s = S.sheet;
+  const d = el.dataset;
+  if (a === "sheet-bg") { closeSheet(); return; }
+  if (a === "sheet-close") { closeSheet(); return; }
+  if (!s) return;
+  const rerender = () => renderSheet();
+  switch (a) {
+    case "l-tab": s.tab = d.v; rerender(); if (s.tab === "rutin") loadRoutineLast(s); return;
+    case "l-truck": Object.assign(s, { truckId: d.id, pickTruck: false, zone: null, group: null, page: 0, pick: null, pop: null, all: false }); rerender(); if (s.tab === "rutin") loadRoutineLast(s); return;
+    case "l-ganti": s.pickTruck = true; rerender(); return;
+    case "l-zone": {
+      const z = ZONES.find((x) => x.key === d.v);
+      Object.assign(s, { zone: z.key, group: null, page: 0, pop: null, all: false, allCat: null });
+      rerender(); return;
+    }
+    case "l-into": { const z = ZONES.find((x) => x.key === s.zone); if (z && z.group) { s.group = z.group; s.page = 0; s.pop = null; } rerender(); return; }
+    case "l-up": Object.assign(s, { group: null, pop: null }); rerender(); return;
+    case "l-page": s.page = Number(d.v); s.pop = null; rerender(); return;
+    case "l-all": s.all = true; s.allCat = null; s.pop = null; rerender(); return;
+    case "l-allcat": s.allCat = d.v; rerender(); return;
+    case "l-loc": s.loc = d.v; rerender(); return;
+    case "l-fm": { const f = fmById(d.id); s.pick = { fmId: f.id, fmName: f.name, label: f.name }; rerender(); return; }
+    case "l-suggest": { const f = fmById(s.suggestion.id); if (f) s.pick = { fmId: f.id, fmName: f.name, label: f.name }; rerender(); return; }
+    case "l-part": {
+      const page = GROUPS[s.group][s.page];
+      const p = page.parts[Number(d.v)];
+      if (p.routine) { Object.assign(s, { tab: "rutin", rItem: p.routine }); rerender(); loadRoutineLast(s); return; }
+      if (p.brake) { s.pop = { title: p.label, choices: BRAKE_CHOICES, positionId: p.id, label: p.label }; rerender(); return; }
+      const f = fmByName(p.fm);
+      if (!f) { toast("Jenis masalah ini belum ada di katalog."); return; }
+      s.pick = { fmId: f.id, fmName: f.name, component_position: p.id || null, label: p.label + (p.label !== f.name ? " · " + f.name : "") };
+      s.pop = null; rerender(); return;
+    }
+    case "l-wheel": { const w = GROUPS[s.group][s.page].wheels[Number(d.v)]; s.pop = { title: "Roda " + w.num, choices: WHEEL_CHOICES, wheelCode: w.code, label: "Roda " + w.num }; rerender(); return; }
+    case "l-pop-close": s.pop = null; rerender(); return;
+    case "l-pop-pick": {
+      const f = fmByName(s.pop.choices[Number(d.v)]);
+      if (f) s.pick = { fmId: f.id, fmName: f.name, component_position: s.pop.positionId || null, wheel_position: s.pop.wheelCode || null, label: s.pop.label + " · " + f.name };
+      s.pop = null; rerender(); return;
+    }
+    case "l-existing": { const tid = s.truckId; closeSheet(); S.truckId = tid; S.view = "truck"; render(); return; }
+    case "l-save": {
+      const r = openRepairOf(s.truckId);
+      const payload = { failure_mode_id: s.pick.fmId, description: s.desc.trim() || null, wheel_position: s.pick.wheel_position || null, component_position: s.pick.component_position || null };
+      const tid = s.truckId;
+      closeSheet();
+      S.truckId = tid; S.view = "truck";
+      // One ticket per truck: a truck already in the workshop gets the new
+      // problem added to its open repair, never a second repair.
+      run(() => r ? api("add_issue", { repair_record_id: r.id, ...payload }) : api("create_repair", { truck_id: tid, location: s.loc, ...payload }), "Laporan tersimpan.");
+      return;
+    }
+    case "r-item": s.rItem = d.v; s.rQty = 0; rerender(); loadRoutineLast(s); return;
+    case "r-qty": { const it = ROUTINE_ITEMS.find((i) => i.type === s.rItem); s.rQty = Math.max(0, (s.rQty || 0) + Number(d.v) * (it.step || 1)); rerender(); return; }
+    case "r-save": {
+      const it = ROUTINE_ITEMS.find((i) => i.type === s.rItem);
+      const payload = { truck_id: s.truckId, item_type: s.rItem, performed_at: s.rDate, quantity: it.unit && s.rQty ? s.rQty : null, unit: it.unit && s.rQty ? it.unit : null, notes: (s.rNotes || "").trim() || null };
+      closeSheet();
+      run(() => api("add_routine_maintenance", payload), "Servis rutin dicatat.");
+      return;
+    }
+    case "p-qty": { const n = d.n; s.items[n] = Math.max(0, (s.items[n] || 0) + Number(d.v)); if (!s.items[n] && !(PART_SUGGESTIONS[s.cat] || []).includes(n)) delete s.items[n]; rerender(); return; }
+    case "p-add": { const n = (s.other || "").trim(); if (!n) return; s.items[n] = (s.items[n] || 0) + 1; s.other = ""; rerender(); return; }
+    case "p-send": {
+      const text = Object.entries(s.items).filter(([, q]) => q > 0).map(([n, q]) => (q > 1 ? `${n} ×${q}` : n)).join(", ");
+      const { rid, iid } = s;
+      closeSheet();
+      run(() => api("request_parts", { repair_record_id: rid, issues: [{ id: iid, parts_used: text }] }), "Permintaan part terkirim.");
+      return;
+    }
+    case "e-cat": s.cat = d.v; rerender(); return;
+    case "e-save": {
+      const { iid, fmId, desc } = s;
+      closeSheet();
+      run(() => api("update_issue", { id: iid, failure_mode_id: fmId, description: (desc || "").trim() || null }), "Tersimpan.");
+      return;
+    }
+    case "e-del": {
+      const { iid } = s;
+      closeSheet();
+      later("del:" + iid, "Masalah dihapus.", () => api("delete_issue", { id: iid }));
+      return;
+    }
+  }
+}
+// The edit sheet reuses fmList, whose rows fire l-fm -- route that to the edit state.
+document.addEventListener("click", (ev) => {
+  const el = ev.target.closest("[data-act='l-fm']");
+  if (el && S.sheet && S.sheet.type === "edit") { ev.stopImmediatePropagation(); S.sheet.fmId = el.dataset.id; renderSheet(); }
+}, true);
+
+// ---------- Telegram back button ----------
+function syncTelegramBack() {
+  if (!tg || !tg.BackButton) return;
+  const show = !!S.sheet || (!wide() && (S.view === "truck" || S.view === "cek"));
+  show ? tg.BackButton.show() : tg.BackButton.hide();
+}
+if (tg && tg.BackButton) tg.BackButton.onClick(() => {
+  if (S.sheet) closeSheet(); else { S.view = "board"; render(); }
+  syncTelegramBack();
+});
+
+// ---------- demo data (#demo): looks real, writes nothing ----------
+function demoApi(action, payload) {
+  const D = window.__demo || (window.__demo = makeDemo());
+  if (action === "tablet_mechanics") return Promise.resolve({ mechanics: D.mechanics.map((m) => ({ ...m, has_pin: true })) });
+  if (action === "pin_login") {
+    if (payload.pin !== "1234") return Promise.reject(Object.assign(new Error("PIN salah. (demo: 1234)"), { code: "wrong_pin" }));
+    return Promise.resolve({ sessionToken: "demo", mechanic: D.mechanics.find((m) => m.id === payload.mechanic_id) });
+  }
+  if (action === "init_data") return Promise.resolve({ ...D, me: S.me || D.mechanics[0] });
+  if (action === "list_routine_maintenance") return Promise.resolve({ latestByItem: {} });
+  if (action === "classify_failure_mode") return Promise.resolve({ failure_mode_id: null, confidence: "none" });
+  return Promise.resolve({ ok: true, demo: true });
+}
+function makeDemo() {
+  const fm = (id, name, category) => ({ id, name, category });
+  const failureModes = [
+    fm("f1", "Selang rem bocor/rusak", "rem"), fm("f2", "Kampas rem habis", "rem"), fm("f3", "Rem blong", "rem"), fm("f4", "Bearing/laher rusak", "chassis"),
+    fm("f5", "Per/suspensi patah", "chassis"), fm("f6", "Chassis retak/las", "chassis"), fm("f7", "Gearbox/transmisi bermasalah", "transmisi"), fm("f8", "Kopling rusak", "transmisi"),
+    fm("f9", "Ban bocor/pecah", "ban"), fm("f10", "Baud roda kendor/patah", "ban"), fm("f11", "Velg rusak/penyok", "ban"), fm("f12", "Aki soak", "kelistrikan"),
+    fm("f13", "Turbo rusak", "mesin"), fm("f14", "Kebocoran oli", "mesin"), fm("f15", "Lainnya", "lainnya"), fm("f16", "Kopel/as kopel rusak", "transmisi"), fm("f17", "Shockbreaker rusak", "chassis"),
+  ];
+  const f = (id) => failureModes.find((x) => x.id === id);
+  const mechanics = [{ id: "m-oki", name: "Oki" }, { id: "m-surady", name: "Surady" }];
+  return {
+    mechanics, failureModes, vendors: [],
+    trucks: ["07", "11", "51", "52", "65", "93", "95", "96"].map((id) => ({ id, nickname: id, plate: "B 9" + id + " XX" })),
+    truckStates: [["07", "IDLE_UNKNOWN"], ["11", "UNDER_REPAIR"], ["51", "FERRY"], ["52", "IN_TRANSIT"], ["65", "FERRY"], ["93", "IN_TRANSIT"], ["95", "FERRY"], ["96", "UNDER_REPAIR"]].map(([truck_id, state]) => ({ truck_id, state })),
+    openRepairs: [
+      { id: "r96", seq: 17, truck_id: "96", location: "pool", downtime_start: new Date(Date.now() - 864e5).toISOString(), repair_photos: [], repair_record_issues: [
+        { id: "i1", status: "in_progress", failure_mode_id: "f1", failure_modes: f("f1"), description: "Selang putus, sementara disumbat paku", component_position: "rem-3" },
+      ]},
+      { id: "r52", seq: 18, truck_id: "52", location: "pool", repair_photos: [], repair_record_issues: [
+        { id: "i2", status: "reported", failure_mode_id: "f7", failure_modes: f("f7"), description: "Tongkat transmisi patah, minta izin dilas" },
+      ]},
+      { id: "r11", seq: 14, truck_id: "11", location: "pool", repair_photos: [], repair_record_issues: [
+        { id: "i3", status: "request_for_parts", failure_mode_id: "f16", failure_modes: f("f16"), parts_used: "Cross joint", component_position: "powertrain-kopel-1" },
+      ]},
+    ],
+    pendingSignoff: [
+      { id: "r95", seq: 15, truck_id: "95", marked_done_by_mechanic_id: "m-surady", repair_photos: [], repair_record_issues: [
+        { id: "i4", failure_modes: f("f6"), description: "Sasis kanan dan kiri dilas", done_by_mechanic_id: "m-surady" },
+      ]},
+    ],
+  };
+}
+
+// ---------- start ----------
+(async function init() {
+  if (S.mode === "telegram") {
+    tg.ready(); tg.expand();
+    try { tg.setHeaderColor && tg.setHeaderColor("#F5F2EE"); tg.setBackgroundColor && tg.setBackgroundColor("#F5F2EE"); } catch (e) { /* older clients */ }
+    render();
+    try { await load(); } catch (e) { $("#app").innerHTML = `<div class="stack" style="max-width:480px;margin:25vh auto;padding:0 24px;text-align:center"><h1 class="large-title">Bengkel SKL</h1><p class="hint">${esc(e.message)}</p></div>`; }
+    return;
+  }
+  if (S.mode === "tablet") {
+    // One-time registration link: #setup=<device key>. Kept in this
+    // browser only; the hash never reaches a server log.
+    const m = location.hash.match(/^#setup=([0-9a-f]{48})$/);
+    if (m) { try { localStorage.setItem(DEVICE_KEY_STORE, m[1]); } catch (e) { /* ignore */ } history.replaceState(null, "", location.pathname); }
+    try { S.deviceKey = localStorage.getItem(DEVICE_KEY_STORE); } catch (e) { S.deviceKey = null; }
+    if (!S.deviceKey) { render(); return; }
+  }
+  render();
+  loadLockList();
+})();
+// Keep the board fresh while it's open (another mechanic, the dispatcher
+// or the office may have changed something).
+setInterval(() => { if (S.data && !S.sheet && !S.pending && document.visibilityState === "visible") load().catch(() => {}); }, 60000);
 </script>
 </body>
 </html>
