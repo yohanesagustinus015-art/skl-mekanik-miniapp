@@ -225,13 +225,35 @@ const LOCATION_LABELS = { pool: "Pool", storing_luar: "Storing", bengkel_luar: "
 const STATE_LABELS = { IN_TRANSIT: "Transit", UNLOADING: "Bongkar", LOADING: "Muat", QUEUING_PICKUP: "Muat", DECIDING: "Pilih rute", FERRY: "Ferry", WAITING_YARD: "Di Pool", IDLE_UNKNOWN: "Idle", UNDER_REPAIR: "Perbaikan", POSITIONING: "Positioning" };
 const STATE_COLOR = { IN_TRANSIT: "#22C55E", LOADING: "#3B82F6", UNLOADING: "#3B82F6", QUEUING_PICKUP: "#3B82F6", DECIDING: "#D97706", FERRY: "#a78bfa", WAITING_YARD: "#0D9488", IDLE_UNKNOWN: "#4A5568", UNDER_REPAIR: "#EF4444", POSITIONING: "#22C55E" };
 const ROUTINE_FM_NAMES = ["Ganti filter oli", "Ganti filter solar", "Ganti oli mesin", "Ganti minyak rem"];
-const ROUTINE_ITEMS = [
-  { type: "filter_solar", label: "Filter solar" },
-  { type: "filter_oli", label: "Filter oli" },
+// Routine items and their limits come from the service_items table (one
+// list for this app, the dashboard and the service_due view, 2026-09-25).
+// This is only the fallback if the backend sends none.
+const ROUTINE_ITEMS_FALLBACK = [
   { type: "oli_mesin", label: "Oli mesin", unit: "liter", step: 1 },
+  { type: "filter_oli", label: "Filter oli" },
+  { type: "filter_solar_primer", label: "Filter solar primer" },
+  { type: "filter_solar_utama", label: "Filter solar utama" },
   { type: "minyak_rem", label: "Minyak rem", unit: "ml", step: 100 },
   { type: "terpal", label: "Terpal" },
 ];
+function routineItems() {
+  const rows = S.data && S.data.serviceItems;
+  if (!rows || !rows.length) return ROUTINE_ITEMS_FALLBACK;
+  return rows.map((r) => ({ type: r.item_type, label: r.label, unit: r.unit, step: Number(r.qty_step) || 1, km: r.interval_km, months: r.interval_months }));
+}
+const DUE_RANK = { lewat: 0, segera: 1, km_belum_diketahui: 2, belum_ada_data: 3, ok: 4 };
+const DUE_CHIP = { lewat: ["st-work", "Lewat jadwal"], segera: ["st-amber", "Segera"], ok: ["st-done", "OK"], km_belum_diketahui: ["st-neutral", "Km belum diketahui"], belum_ada_data: ["st-neutral", "Belum pernah dicatat"] };
+function dueOf(truckId) {
+  return (S.data.serviceDue || []).filter((d) => d.truck_id === truckId)
+    .sort((a, b) => (DUE_RANK[a.status] ?? 9) - (DUE_RANK[b.status] ?? 9));
+}
+function dueText(d) {
+  const parts = [];
+  if (d.km_left != null) parts.push(`${d.km_left >= 0 ? "sisa" : "lewat"} ${Math.abs(d.km_left).toLocaleString("id-ID")} km${d.km_estimated ? " (perkiraan)" : ""}`);
+  if (d.days_left != null) parts.push(`${d.days_left >= 0 ? "sisa" : "lewat"} ${Math.abs(d.days_left)} hari`);
+  if (d.last_date) parts.push("terakhir " + new Date(d.last_date).toLocaleDateString("id-ID", { day: "numeric", month: "short" }));
+  return parts.join(" · ");
+}
 // Suggestions only -- the mechanic can always add any part by name. What
 // is bought, and where, stays staff's decision (standing rule, 2026-08-28).
 const PART_SUGGESTIONS = {
@@ -597,7 +619,7 @@ function renderTruckList() {
       : `<span class="dot" style="background:${STATE_COLOR[st && st.state] || "#B0A594"}"></span>`;
     return `<button class="row indent ${selected ? "selected" : ""}" data-act="truck" data-id="${esc(t.id)}">
       <span class="truck-num">${esc(t.nickname || t.id)}</span>
-      <span class="grow"><span class="title">${s.needs ? esc(s.title) : esc(STATE_LABELS[st && st.state] || "Tidak ada data")}</span><span class="meta">${s.needs ? esc(s.meta) : esc(t.plate || "")}</span></span>
+      <span class="grow"><span class="title">${s.needs ? esc(s.title) : esc(STATE_LABELS[st && st.state] || "Tidak ada data")}</span><span class="meta">${s.needs ? esc(s.meta) : esc(t.plate || "")}${(() => { const late = dueOf(t.id).filter((x) => x.status === "lewat").length; return late ? ` · <span style="color:var(--accent);font-weight:600">${late} servis lewat</span>` : ""; })()}</span></span>
       ${right}${chevron()}
     </button>`;
   }).join("");
@@ -608,7 +630,8 @@ function renderTruckList() {
     ${list.length ? `<div class="group">${rows}</div>` : `<div class="group"><div class="empty-note">Semua truk jalan normal.</div></div>`}
     ${S.filter === "work" && normal.length ? `<span class="eyebrow">Jalan normal</span><div class="normal-list">${normal.map(({ t }) => {
       const st = truckState(t.id);
-      return `<span><span class="dot" style="background:${STATE_COLOR[st && st.state] || "#B0A594"}"></span><b>${esc(t.nickname || t.id)}</b><span class="sub">${esc(STATE_LABELS[st && st.state] || "—")}</span></span>`;
+      const late = dueOf(t.id).filter((d) => d.status === "lewat").length;
+      return `<span><span class="dot" style="background:${STATE_COLOR[st && st.state] || "#B0A594"}"></span><b>${esc(t.nickname || t.id)}</b><span class="sub">${esc(STATE_LABELS[st && st.state] || "—")}</span>${late ? `<button class="pill st-work" style="margin-left:auto" data-act="truck" data-id="${esc(t.id)}">${late} servis lewat</button>` : ""}</span>`;
     }).join("")}</div>` : ""}`;
 }
 
@@ -628,7 +651,7 @@ function renderTruck(id) {
 
   if (!r && !pend.length) {
     return `${head}<div class="group"><div class="empty-note">Tidak ada masalah terbuka di truk ini.</div></div>
-      <button class="btn btn-primary" data-act="lapor" data-truck="${esc(id)}">+ Lapor masalah di truk ini</button>`;
+      <button class="btn btn-primary" data-act="lapor" data-truck="${esc(id)}">+ Lapor masalah di truk ini</button>${renderService(id)}`;
   }
 
   let out = head;
@@ -648,7 +671,25 @@ function renderTruck(id) {
     const who = [...workersOf(p)].map(mechName).filter(Boolean).join(", ");
     out += `<div class="group"><div class="row"><span class="grow"><span class="title">Servis #${esc(p.seq)} beres${who ? " · " + esc(who) : ""}</span><span class="meta">Tunggu dicek mekanik lain</span></span><span class="pill st-done">Tunggu dicek</span></div></div>`;
   });
-  return out;
+  return out + renderService(id);
+}
+
+// Scheduled service for this truck, most urgent first. Km from the tracker
+// odometer, days from the last log; due at whichever limit comes first.
+// Tapping a row opens the routine-service sheet on that item.
+function renderService(id) {
+  const rows = dueOf(id);
+  if (!rows.length) return "";
+  const items = routineItems();
+  return `<span class="eyebrow" style="margin-top:6px">Servis berkala</span>
+    <div class="group">${rows.map((d) => {
+      const it = items.find((x) => x.type === d.item_type);
+      const [cls, lbl] = DUE_CHIP[d.status] || ["st-neutral", d.status];
+      return `<button class="row" data-act="service" data-truck="${esc(id)}" data-item="${esc(d.item_type)}">
+        <span class="grow"><span class="title">${esc(it ? it.label : d.item_type)}</span><span class="meta">${esc(dueText(d) || "Belum pernah dicatat — tekan untuk catat terakhir diganti")}</span></span>
+        <span class="pill ${cls}">${esc(lbl)}</span>${chevron()}
+      </button>`;
+    }).join("")}</div>`;
 }
 
 function renderIssue(r, i) {
@@ -873,6 +914,12 @@ document.addEventListener("click", async (ev) => {
     case "issue-done": later("issue:" + d.iid, "Ditandai beres.", () => api("mark_issue_done", { id: d.iid })); return;
     case "repair-done": later("repair:" + d.rid, "Servis ditutup, tunggu dicek teman.", () => api("mark_done", { id: d.rid })); return;
     case "sign": later("sign:" + d.rid, "Dicek OK.", () => api("sign_off", { id: d.rid })); return;
+    case "service": {
+      openLapor(d.truck);
+      Object.assign(S.sheet, { tab: "rutin", rItem: d.item, rQty: 0 });
+      renderSheet(); loadRoutineLast(S.sheet);
+      return;
+    }
     case "parts": openParts(d.rid, d.iid); return;
     case "edit": openEdit(d.iid); return;
     case "photo": pickPhoto(d.rid); return;
@@ -1068,10 +1115,10 @@ function laporFoot(s) {
 }
 
 function rutinBody(s) {
-  const item = ROUTINE_ITEMS.find((i) => i.type === s.rItem);
+  const item = routineItems().find((i) => i.type === s.rItem);
   return `<div class="two-col"><div class="stack">
     <span class="eyebrow">Apa yang diganti</span>
-    <div class="group">${ROUTINE_ITEMS.map((i) => `<button class="row ${s.rItem === i.type ? "selected" : ""}" data-act="r-item" data-v="${i.type}"><span class="grow"><span class="title">${esc(i.label)}</span>${s.rItem === i.type && s.rLast !== null ? `<span class="meta">${esc(s.rLast || "Belum pernah dicatat untuk truk ini.")}</span>` : ""}</span></button>`).join("")}</div>
+    <div class="group">${routineItems().map((i) => `<button class="row ${s.rItem === i.type ? "selected" : ""}" data-act="r-item" data-v="${i.type}"><span class="grow"><span class="title">${esc(i.label)}</span>${s.rItem === i.type && s.rLast !== null ? `<span class="meta">${esc(s.rLast || "Belum pernah dicatat untuk truk ini.")}</span>` : ""}</span></button>`).join("")}</div>
   </div><div class="stack">
     <span class="eyebrow">Tanggal</span><input class="field" type="date" data-bind="rDate" value="${esc(s.rDate)}">
     ${item && item.unit ? `<span class="eyebrow">Jumlah (${item.unit})</span><div class="row" style="border-radius:var(--r)"><span class="grow"><span class="title">${s.rQty || 0} ${item.unit}</span></span><div class="seg" style="grid-auto-columns:64px"><button data-act="r-qty" data-v="-1" aria-label="Kurangi">−</button><button data-act="r-qty" data-v="1" aria-label="Tambah">+</button></div></div>` : ""}
@@ -1080,7 +1127,7 @@ function rutinBody(s) {
 }
 function rutinFoot(s) {
   const t = (S.data.trucks || []).find((x) => x.id === s.truckId);
-  const item = ROUTINE_ITEMS.find((i) => i.type === s.rItem);
+  const item = routineItems().find((i) => i.type === s.rItem);
   const ok = t && item;
   return `<div class="sheet-foot"><span class="summary">${ok ? `<b>Truk ${esc(t.nickname || t.id)}</b> · ${esc(item.label)} · ${esc(s.rDate)}` : "Pilih truk dan yang diganti."}</span><button class="btn btn-primary" style="min-width:220px;min-height:60px" data-act="r-save" ${ok ? "" : "disabled"}>Catat</button></div>`;
 }
@@ -1193,7 +1240,9 @@ function sheetAction(a, el) {
     case "l-part": {
       const page = GROUPS[s.group][s.page];
       const p = page.parts[Number(d.v)];
-      if (p.routine) { Object.assign(s, { tab: "rutin", rItem: p.routine }); rerender(); loadRoutineLast(s); return; }
+      // The photo shows one fuel-filter spot but the truck has two filters
+      // (primer + utama) -- let them pick which, rather than guess.
+      if (p.routine) { Object.assign(s, { tab: "rutin", rItem: p.routine === "filter_solar" ? null : p.routine }); rerender(); loadRoutineLast(s); return; }
       if (p.brake) { s.pop = { title: p.label, choices: BRAKE_CHOICES, positionId: p.id, label: p.label }; rerender(); return; }
       const f = fmByName(p.fm);
       if (!f) { toast("Jenis masalah ini belum ada di katalog."); return; }
@@ -1226,9 +1275,9 @@ function sheetAction(a, el) {
       return;
     }
     case "r-item": s.rItem = d.v; s.rQty = 0; rerender(); loadRoutineLast(s); return;
-    case "r-qty": { const it = ROUTINE_ITEMS.find((i) => i.type === s.rItem); s.rQty = Math.max(0, (s.rQty || 0) + Number(d.v) * (it.step || 1)); rerender(); return; }
+    case "r-qty": { const it = routineItems().find((i) => i.type === s.rItem); s.rQty = Math.max(0, (s.rQty || 0) + Number(d.v) * (it.step || 1)); rerender(); return; }
     case "r-save": {
-      const it = ROUTINE_ITEMS.find((i) => i.type === s.rItem);
+      const it = routineItems().find((i) => i.type === s.rItem);
       const payload = { truck_id: s.truckId, item_type: s.rItem, performed_at: s.rDate, quantity: it.unit && s.rQty ? s.rQty : null, unit: it.unit && s.rQty ? it.unit : null, notes: (s.rNotes || "").trim() || null };
       closeSheet();
       run(() => api("add_routine_maintenance", payload), "Servis rutin dicatat.");
@@ -1313,8 +1362,23 @@ function makeDemo() {
   ];
   const f = (id) => failureModes.find((x) => x.id === id);
   const mechanics = [{ id: "m-oki", name: "Oki" }, { id: "m-surady", name: "Surady" }];
+  const si = (item_type, label, interval_km, interval_months, unit, qty_step, sort) => ({ item_type, label, interval_km, interval_months, unit, qty_step, sort });
+  const serviceItems = [
+    si("oli_mesin", "Oli mesin", 5000, 2, "liter", 1, 10), si("filter_oli", "Filter oli", 5000, 2, null, null, 20),
+    si("filter_solar_primer", "Filter solar primer", 5000, null, null, null, 30), si("filter_solar_utama", "Filter solar utama", 5000, null, null, null, 40),
+    si("oli_transmisi", "Oli transmisi", 30000, 6, "liter", 1, 50), si("minyak_rem", "Minyak rem", null, 12, "ml", 100, 80), si("terpal", "Terpal", null, null, null, null, 110),
+  ];
+  const due = (truck_id, item_type, status, extra = {}) => ({ truck_id, item_type, status, last_date: null, km_left: null, days_left: null, km_estimated: false, ...extra });
+  const serviceDue = [
+    due("96", "oli_mesin", "lewat", { last_date: "2026-07-20", km_left: -620, days_left: -3 }),
+    due("96", "filter_oli", "segera", { last_date: "2026-08-10", km_left: 700, days_left: 17, km_estimated: true }),
+    due("96", "filter_solar_primer", "belum_ada_data"), due("96", "filter_solar_utama", "belum_ada_data"),
+    due("96", "oli_transmisi", "ok", { last_date: "2026-06-01", km_left: 21400, days_left: 67 }),
+    due("96", "minyak_rem", "ok", { last_date: "2026-03-01", days_left: 157 }),
+    due("93", "oli_mesin", "lewat", { last_date: "2026-07-01", km_left: -1200, days_left: -26 }),
+  ];
   return {
-    mechanics, failureModes, vendors: [],
+    mechanics, failureModes, vendors: [], serviceItems, serviceDue,
     trucks: ["07", "11", "51", "52", "65", "93", "95", "96"].map((id) => ({ id, nickname: id, plate: "B 9" + id + " XX" })),
     truckStates: [["07", "IDLE_UNKNOWN"], ["11", "UNDER_REPAIR"], ["51", "FERRY"], ["52", "IN_TRANSIT"], ["65", "FERRY"], ["93", "IN_TRANSIT"], ["95", "FERRY"], ["96", "UNDER_REPAIR"]].map(([truck_id, state]) => ({ truck_id, state })),
     openRepairs: [
