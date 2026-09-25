@@ -208,6 +208,16 @@ textarea.field { min-height: 88px; resize: vertical; }
   .pop.low, .pop.high { top: auto; }
   #toast { bottom: calc(86px + env(safe-area-inset-bottom)); }
 }
+/* Phone: the photo is too narrow for every label. Parts show as dots with
+   a thumb-sized tap area; only the chosen one shows its name. The list
+   under the photo names them all. */
+@media (max-width: 599px) {
+  .spot.pin:not(.sel) { width: 40px; height: 40px; min-height: 0; padding: 0; font-size: 0; background: transparent; box-shadow: none; transform: translate(-50%, -50%); justify-content: center; }
+  .spot.pin:not(.sel)::before { display: none; }
+  .spot.pin:not(.sel)::after { top: 50%; left: 50%; width: 16px; height: 16px; margin: -8px 0 0 -8px; }
+  .spot.pin.open:not(.sel)::after { width: 22px; height: 22px; margin: -11px 0 0 -11px; }
+  .spot.pin:not(.sel) .n { position: absolute; z-index: 1; top: 50%; left: 50%; transform: translate(-50%, -50%); min-width: 18px; height: 18px; font-size: 11px; background: transparent; color: #fff; }
+}
 @media (min-width: 900px) {
   .tabbar { display: none; }
   #toast { bottom: 28px; }
@@ -960,8 +970,10 @@ function renderSheet() {
 // is lifted higher on its stem, or else hangs below its dot, or else slides
 // sideways -- whichever first lands clear and inside the photo.
 function nudgeSpots(photo) {
-  const pins = [...photo.querySelectorAll(".spot.pin")];
-  pins.forEach((el) => { el.style.removeProperty("--lift"); el.style.removeProperty("--dx"); el.classList.remove("below"); });
+  const all = [...photo.querySelectorAll(".spot.pin")];
+  all.forEach((el) => { el.style.removeProperty("--lift"); el.style.removeProperty("--dx"); el.classList.remove("below"); });
+  // On a phone only the chosen part carries a label (see the CSS).
+  const pins = matchMedia("(max-width: 599px)").matches ? all.filter((el) => el.classList.contains("sel")) : all;
   const pr = photo.getBoundingClientRect();
   const placed = [];
   const inside = (r) => r.left >= pr.left + 2 && r.right <= pr.right - 2 && r.top >= pr.top + 2 && r.bottom <= pr.bottom - 2;
@@ -1048,7 +1060,7 @@ function photoPane(s) {
     }).join("");
     return `<div class="stack"><div class="crumbs"><b>${esc(tname)}</b><button data-act="l-ganti">Ganti</button><span class="sep">›</span><span class="sub">Tekan bagian truk</span></div>
       <div class="photo"><img src="${img("truck-side.jpg")}" alt="Truk tampak samping">${spots}</div>
-      <span class="hint">Angka = masalah yang masih terbuka di bagian itu. Cubit layar untuk zoom.</span></div>`;
+      <span class="hint">${matchMedia("(max-width: 599px)").matches ? "Tekan titik di foto, atau pilih dari daftar di bawah. Angka = masalah yang masih terbuka." : "Angka = masalah yang masih terbuka di bagian itu. Cubit layar untuk zoom."}</span></div>`;
   }
   const zone = ZONES.find((z) => z.key === s.zone);
   const pages = GROUPS[s.group];
@@ -1060,7 +1072,7 @@ function photoPane(s) {
   }).join("")}</div>` : "";
   const spots = (page.parts || []).map((p, n) => {
     const c = p.id ? openAt(p.id) : 0;
-    const sel = s.pick && ((p.id && s.pick.component_position === p.id) || (!p.id && s.pick.fmName === p.fm));
+    const sel = s.pick && (s.pick.spot ? s.pick.spot === page.imageKey + ":" + n : !!p.id && s.pick.component_position === p.id);
     return `<button class="spot pin ${c ? "open" : ""} ${sel ? "sel" : ""}" style="left:${p.left}%;top:${p.top}%" data-act="l-part" data-v="${n}">${c ? `<span class="n">${c}</span>` : ""}${esc(p.label)}</button>`;
   }).join("") + (page.wheels || []).map((w, n) => {
     const c = openAt(w.code);
@@ -1111,7 +1123,7 @@ function listPane(s) {
   if (s.group) {
     const page = GROUPS[s.group][s.page] || GROUPS[s.group][0];
     html += `<div class="group">${(page.parts || []).map((p, n) => {
-      const sel = s.pick && ((p.id && s.pick.component_position === p.id) || (!p.id && s.pick.fmName === p.fm && !s.pick.component_position));
+      const sel = s.pick && (s.pick.spot ? s.pick.spot === page.imageKey + ":" + n : !!p.id && s.pick.component_position === p.id);
       const sub = p.routine ? "Servis rutin — catat ganti" : p.brake ? "Rem — pilih masalahnya" : p.fm;
       return `<button class="row ${sel ? "selected" : ""}" data-act="l-part" data-v="${n}"><span class="grow"><span class="title">${esc(p.label)}</span><span class="meta">${esc(sub)}</span></span>${chevron()}</button>`;
     }).join("")}${(page.wheels || []).length ? `<div class="row"><span class="grow"><span class="meta">Tekan nomor roda di foto.</span></span></div>` : ""}${page.crack ? `<div class="row"><span class="grow"><span class="meta">Chassis retak? Tekan tempat retaknya di foto.</span></span></div>` : ""}</div>`;
@@ -1271,10 +1283,11 @@ function sheetAction(a, el) {
       // The photo shows one fuel-filter spot but the truck has two filters
       // (primer + utama) -- let them pick which, rather than guess.
       if (p.routine) { Object.assign(s, { tab: "rutin", rItem: p.routine === "filter_solar" ? null : p.routine }); rerender(); loadRoutineLast(s); return; }
-      if (p.brake) { s.pop = { title: p.label, choices: BRAKE_CHOICES, positionId: p.id, label: p.label }; rerender(); return; }
+      if (p.brake) { s.pop = { title: p.label, choices: BRAKE_CHOICES, positionId: p.id, label: p.label, spot: page.imageKey + ":" + d.v }; rerender(); return; }
       const f = fmByName(p.fm);
       if (!f) { toast("Jenis masalah ini belum ada di katalog."); return; }
-      s.pick = { fmId: f.id, fmName: f.name, component_position: p.id || null, label: p.label + (p.label !== f.name ? " · " + f.name : "") };
+      // Which dot, not just which problem: two dots can share a problem type.
+      s.pick = { fmId: f.id, fmName: f.name, component_position: p.id || null, spot: page.imageKey + ":" + d.v, label: p.label + (p.label !== f.name ? " · " + f.name : "") };
       s.pop = null; rerender(); return;
     }
     case "l-wheel": { const w = GROUPS[s.group][s.page].wheels[Number(d.v)]; s.pop = { title: "Roda " + w.num, choices: WHEEL_CHOICES, wheelCode: w.code, label: "Roda " + w.num }; rerender(); return; }
@@ -1296,7 +1309,7 @@ function sheetAction(a, el) {
       const f = fmByName(s.pop.choices[Number(d.v)]);
       const c = s.pop.crackAt;
       if (f && c) s.pick = { fmId: f.id, fmName: f.name, label: "Rangka · " + f.name, chassis_position: `Rangka ${Math.round(c.left_pct)}% ${Math.round(c.top_pct)}%`, crack_point: c };
-      else if (f) s.pick = { fmId: f.id, fmName: f.name, component_position: s.pop.positionId || null, wheel_position: s.pop.wheelCode || null, label: s.pop.label + " · " + f.name };
+      else if (f) s.pick = { fmId: f.id, fmName: f.name, component_position: s.pop.positionId || null, wheel_position: s.pop.wheelCode || null, spot: s.pop.spot || null, label: s.pop.label + " · " + f.name };
       s.pop = null; rerender(); return;
     }
     case "l-existing": { const tid = s.truckId; closeSheet(); S.truckId = tid; S.view = "truck"; render(); return; }
