@@ -163,6 +163,7 @@ textarea.field { min-height: 88px; resize: vertical; }
 .pdot.sel::after { width: 20px; height: 20px; margin: -10px 0 0 -10px; border: 3px solid var(--text); }
 .spot.plabel { transform: translate(-50%, calc(-100% - 16px)); z-index: 2; }
 .spot.plabel.placed { transform: none; }
+.spot.plabel:not(.open) { background: #fff; } /* opaque: the line runs underneath to its centre */
 .leaders { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
 .leaders line { stroke-linecap: round; }
 .leaders line.halo { stroke: rgba(255,255,255,.9); stroke-width: 5; }
@@ -1053,7 +1054,7 @@ function placeLabels(photo) {
         score += overlap(b, { x1: d.x - 9, y1: d.y - 9, x2: d.x + 9, y2: d.y + 9 }) * 30;
         if (segHitsBox(a, end, { x1: d.x - 6, y1: d.y - 6, x2: d.x + 6, y2: d.y + 6 })) score += 800;
       });
-      if (!best || score < best.score) best = { score, box: b, a, end };
+      if (!best || score < best.score) best = { score, box: b, a, end, mid: { x: cx, y: cy } };
     }));
     it.el.style.left = best.box.x1 + "px";
     it.el.style.top = best.box.y1 + "px";
@@ -1062,11 +1063,17 @@ function placeLabels(photo) {
   });
   // A white edge under an oxblood line: readable on dark metal and on the
   // grey backdrop alike (the plain grey line disappeared into both).
-  const seg = (p, cls) => `<line class="${cls}" x1="${p.a.x}" y1="${p.a.y}" x2="${p.end.x}" y2="${p.end.y}"/>`;
+  // Drawn to the label's centre, underneath it: the label covers the end,
+  // so the line reaches it whatever size the label renders at (a font that
+  // loads late, or a different device, changes the size after placement;
+  // ending exactly at the measured edge left visible gaps).
+  const seg = (p, cls) => `<line class="${cls}" x1="${p.a.x}" y1="${p.a.y}" x2="${p.mid.x}" y2="${p.mid.y}"/>`;
   const lines = placed.map((p) => seg(p, "halo")).join("") + placed.map((p) => seg(p, "ink")).join("");
   photo.querySelector("img").insertAdjacentHTML("afterend", `<svg class="leaders" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${lines}</svg>`);
 }
 const photoObserver = new ResizeObserver((entries) => entries.forEach((e) => placeLabels(e.target)));
+// Labels measured before the web font arrives are the wrong size; place again once it has.
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => document.querySelectorAll("#sheet-root .photo").forEach(placeLabels));
 function sheetHead(title, right = "") {
   return `<div class="sheet-head"><button data-act="sheet-close">Batal</button><span class="t">${title}</span><span style="justify-self:end">${right}</span></div>`;
 }
@@ -1189,29 +1196,36 @@ function listPane(s) {
   if (s.suggestion && (!s.pick || s.pick.fmId !== s.suggestion.id)) html += `<div class="suggest">Mungkin: <b>${esc(s.suggestion.name)}</b><button data-act="l-suggest">Pakai</button></div>`;
   return `<div class="stack">${html}</div>`;
 }
-// Every part on every photo of a zone, grouped by photo, in a fixed order
-// (rows never jump under a finger). Tapping a row opens that photo and picks the part, exactly as
-// tapping its dot does. Problem types no photo shows are listed last.
+// The list follows the photo on screen: its parts, in the same order as
+// the dots. On a close-up, a row at the top goes back to the zone's first
+// photo; on the first photo, rows open the close-ups that no dot opens.
+// Problem types no photo shows sit at the bottom of the first photo.
 function zoneParts(s, zone) {
   const pages = GROUPS[zone.group];
-  const onPhotos = new Set(pages.flatMap((pg) => (pg.parts || []).map((p) => p.fm)));
+  const pi = pages[s.page] ? s.page : 0;
+  const pg = pages[pi];
   let html = "";
-  pages.forEach((pg, pi) => {
-    const rows = (pg.parts || []).map((p, n) => {
-      const sel = s.pick && (s.pick.spot ? s.pick.spot === pg.imageKey + ":" + n : false);
-      const sub = p.opensPage != null ? "Lihat foto detail ›" : p.routine ? "Servis rutin — catat ganti" : p.brake ? "Rem — pilih masalahnya" : p.fm;
-      return `<button class="row ${sel ? "selected" : ""}" data-act="l-zpart" data-p="${pi}" data-v="${n}"><span class="grow"><span class="title">${esc(p.label)}</span><span class="meta">${esc(sub)}</span></span>${chevron()}</button>`;
-    });
-    if ((pg.wheels || []).length) rows.push(pi === s.page
-      ? `<div class="row"><span class="grow"><span class="meta">Tekan nomor roda di foto.</span></span></div>`
-      : `<button class="row" data-act="l-page" data-v="${pi}"><span class="grow"><span class="title">Pilih nomor roda</span><span class="meta">Ban, baud roda, velg</span></span>${chevron()}</button>`);
-    if (pg.crack) rows.push(pi === s.page
-      ? `<div class="row"><span class="grow"><span class="meta">Chassis retak? Tekan tempat retaknya di foto.</span></span></div>`
-      : `<button class="row" data-act="l-page" data-v="${pi}"><span class="grow"><span class="title">Rangka retak</span><span class="meta">Tandai tempat retaknya di foto</span></span>${chevron()}</button>`);
-    if (rows.length) html += `<span class="eyebrow" style="margin-top:6px">${esc(pg.title)}${pi === s.page && pages.length > 1 ? " · di foto" : ""}</span><div class="group">${rows.join("")}</div>`;
+  if (pi > 0) {
+    html += `<div class="group"><button class="row" data-act="l-page" data-v="0"><span class="grow"><span class="title">‹ Kembali ke ${esc(pages[0].title)}</span></span></button></div>`;
+  }
+  const rows = (pg.parts || []).map((p, n) => {
+    const sel = s.pick && s.pick.spot === pg.imageKey + ":" + n;
+    const sub = p.opensPage != null ? "Lihat foto detail ›" : p.routine ? "Servis rutin — catat ganti" : p.brake ? "Rem — pilih masalahnya" : p.fm;
+    return `<button class="row ${sel ? "selected" : ""}" data-act="l-part" data-v="${n}"><span class="grow"><span class="title">${esc(p.label)}</span><span class="meta">${esc(sub)}</span></span>${chevron()}</button>`;
   });
-  const rest = newIssueModes(zone.cats).filter((f) => !onPhotos.has(f.name) && !CRACK_FMS.includes(f.name) && !WHEEL_CHOICES.includes(f.name) && !BRAKE_CHOICES.includes(f.name));
-  if (rest.length) html += `<span class="eyebrow" style="margin-top:6px">Masalah lain di bagian ini</span>` + fmList(rest, s);
+  if ((pg.wheels || []).length) rows.push(`<div class="row"><span class="grow"><span class="meta">Tekan nomor roda di foto.</span></span></div>`);
+  if (pg.crack) rows.push(`<div class="row"><span class="grow"><span class="meta">Chassis retak? Tekan tempat retaknya di foto.</span></span></div>`);
+  if (rows.length) html += `<span class="eyebrow" style="margin-top:6px">${esc(pg.title)}</span><div class="group">${rows.join("")}</div>`;
+  if (pi === 0) {
+    const opened = new Set((pg.parts || []).filter((p) => p.opensPage != null).map((p) => p.opensPage));
+    const others = pages.map((p, k) => k).filter((k) => k > 0 && !opened.has(k));
+    if (others.length) {
+      html += `<span class="eyebrow" style="margin-top:6px">Foto detail</span><div class="group">${others.map((k) => `<button class="row" data-act="l-page" data-v="${k}"><span class="grow"><span class="title">${esc(pages[k].title)}</span></span>${chevron()}</button>`).join("")}</div>`;
+    }
+    const onPhotos = new Set(pages.flatMap((p) => (p.parts || []).map((x) => x.fm)));
+    const rest = newIssueModes(zone.cats).filter((f) => !onPhotos.has(f.name) && !CRACK_FMS.includes(f.name) && !WHEEL_CHOICES.includes(f.name) && !BRAKE_CHOICES.includes(f.name));
+    if (rest.length) html += `<span class="eyebrow" style="margin-top:6px">Masalah lain di bagian ini</span>` + fmList(rest, s);
+  }
   return html;
 }
 function fmList(list, s) {
@@ -1354,9 +1368,6 @@ function sheetAction(a, el) {
     case "l-loc": s.loc = d.v; rerender(); return;
     case "l-fm": { const f = fmById(d.id); s.pick = { fmId: f.id, fmName: f.name, label: f.name }; rerender(); return; }
     case "l-suggest": { const f = fmById(s.suggestion.id); if (f) s.pick = { fmId: f.id, fmName: f.name, label: f.name }; rerender(); return; }
-    case "l-zpart":
-      s.page = Number(d.p); s.pop = null;
-    // falls through: pick the part on that photo, same as tapping its dot
     case "l-part": {
       const page = GROUPS[s.group][s.page];
       const p = page.parts[Number(d.v)];
