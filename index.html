@@ -164,7 +164,9 @@ textarea.field { min-height: 88px; resize: vertical; }
 .spot.plabel { transform: translate(-50%, calc(-100% - 16px)); z-index: 2; }
 .spot.plabel.placed { transform: none; }
 .leaders { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
-.leaders line { stroke: rgba(43,36,32,.7); stroke-width: 1.5; }
+.leaders line { stroke-linecap: round; }
+.leaders line.halo { stroke: rgba(255,255,255,.9); stroke-width: 5; }
+.leaders line.ink { stroke: var(--accent); stroke-width: 2.5; }
 .spot .n { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px; border-radius: 11px; background: #fff; color: var(--accent); font-size: 12px; font-weight: 700; }
 .thumbs { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(112px, 1fr); gap: 8px; overflow-x: auto; padding-bottom: 2px; }
 .thumb { display: flex; flex-direction: column; gap: 5px; padding: 5px; border-radius: 12px; background: var(--surface); text-align: left; }
@@ -354,6 +356,11 @@ function buildDiagram(overrides) {
     wheels: SPEC.wheels.map((w) => ({ code: w.code, num: w.num, ...at("underside", w.code, w.left, w.top) })) };
   const powertrainPage = { title: "Powertrain (tampak bawah)", src: "/static/truck-diagram/truck-underside.jpg", imageKey: "underside",
     parts: SPEC.powertrain.map((h) => part("underside", h)) };
+  // On the underside photo the "Transmisi" dot opens the transmission
+  // close-up instead of reporting -- same as the dashboard (dashboard.html:
+  // h.id==='powertrain-transmisi' -> setShowDetailTransmisi). The gearbox
+  // problems themselves are dots on that close-up.
+  powertrainPage.parts.forEach((p) => { if (p.id === "powertrain-transmisi") p.opensPage = 1; });
   GROUPS = {
     mesin: detailPages("mesin"), kelistrikan: detailPages("kelistrikan"), chassis: detailPages("chassis"), kabin: detailPages("kabin"),
     transmisi: [powertrainPage, ...detailPages("transmisi")], ban: [WHEEL_PAGE, ...detailPages("roda")],
@@ -1053,7 +1060,10 @@ function placeLabels(photo) {
     it.el.classList.add("placed");
     placed.push(best);
   });
-  const lines = placed.map((p) => `<line x1="${p.a.x}" y1="${p.a.y}" x2="${p.end.x}" y2="${p.end.y}"/>`).join("");
+  // A white edge under an oxblood line: readable on dark metal and on the
+  // grey backdrop alike (the plain grey line disappeared into both).
+  const seg = (p, cls) => `<line class="${cls}" x1="${p.a.x}" y1="${p.a.y}" x2="${p.end.x}" y2="${p.end.y}"/>`;
+  const lines = placed.map((p) => seg(p, "halo")).join("") + placed.map((p) => seg(p, "ink")).join("");
   photo.querySelector("img").insertAdjacentHTML("afterend", `<svg class="leaders" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${lines}</svg>`);
 }
 const photoObserver = new ResizeObserver((entries) => entries.forEach((e) => placeLabels(e.target)));
@@ -1189,7 +1199,7 @@ function zoneParts(s, zone) {
   pages.forEach((pg, pi) => {
     const rows = (pg.parts || []).map((p, n) => {
       const sel = s.pick && (s.pick.spot ? s.pick.spot === pg.imageKey + ":" + n : false);
-      const sub = p.routine ? "Servis rutin — catat ganti" : p.brake ? "Rem — pilih masalahnya" : p.fm;
+      const sub = p.opensPage != null ? "Lihat foto detail ›" : p.routine ? "Servis rutin — catat ganti" : p.brake ? "Rem — pilih masalahnya" : p.fm;
       return `<button class="row ${sel ? "selected" : ""}" data-act="l-zpart" data-p="${pi}" data-v="${n}"><span class="grow"><span class="title">${esc(p.label)}</span><span class="meta">${esc(sub)}</span></span>${chevron()}</button>`;
     });
     if ((pg.wheels || []).length) rows.push(pi === s.page
@@ -1337,7 +1347,7 @@ function sheetAction(a, el) {
       rerender(); return;
     }
     case "l-into": { const z = ZONES.find((x) => x.key === s.zone); if (z && z.group) { s.group = z.group; s.page = 0; s.pop = null; } rerender(); return; }
-    case "l-up": Object.assign(s, { group: null, pop: null }); rerender(); return;
+    case "l-up": Object.assign(s, { zone: null, group: null, page: 0, pop: null }); rerender(); return;
     case "l-page": s.page = Number(d.v); s.pop = null; rerender(); return;
     case "l-all": s.all = true; s.allCat = null; s.pop = null; rerender(); return;
     case "l-allcat": s.allCat = d.v; rerender(); return;
@@ -1350,6 +1360,7 @@ function sheetAction(a, el) {
     case "l-part": {
       const page = GROUPS[s.group][s.page];
       const p = page.parts[Number(d.v)];
+      if (p.opensPage != null) { s.page = p.opensPage; s.pop = null; rerender(); return; }
       // The photo shows one fuel-filter spot but the truck has two filters
       // (primer + utama) -- let them pick which, rather than guess.
       if (p.routine) { Object.assign(s, { tab: "rutin", rItem: p.routine === "filter_solar" ? null : p.routine }); rerender(); loadRoutineLast(s); return; }
