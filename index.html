@@ -235,7 +235,12 @@ textarea.field { min-height: 88px; resize: vertical; }
 // Production only, deliberately: no ?api= override. The tablet holds a device
 // key and receives PINs, so a crafted link pointing the page at another
 // server would hand both over.
-const API_URL = "https://kcftvbuwotjjroattdak.supabase.co/functions/v1/mekanik-api";
+// Run the function next to the database (Sydney) instead of nearest to the
+// caller (Singapore): opening the app makes 4 DB trips in a row, and each is
+// ~240 ms from Singapore vs ~40 ms in Sydney. Measured 2026-09-26: median
+// init_data 1.6 s -> 1.3 s. A query parameter, not the x-region header, so
+// the browser doesn't need an extra CORS preflight.
+const API_URL = "https://kcftvbuwotjjroattdak.supabase.co/functions/v1/mekanik-api?forceFunctionRegion=ap-southeast-2";
 const IMG_ORIGIN = "https://skl-ops.ptmercusuar.com";
 // Spec paths are site-absolute ('/static/truck-diagram/x.jpg'); assetVersion
 // busts the browser cache when an image is replaced in place.
