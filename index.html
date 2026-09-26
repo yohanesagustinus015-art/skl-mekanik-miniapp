@@ -1083,7 +1083,13 @@ document.addEventListener("input", (ev) => {
   if (!S.sheet || !el.dataset || !el.dataset.bind) return;
   S.sheet[el.dataset.bind] = el.value;
   S.sheet.focus = el.dataset.bind;
-  if (el.dataset.bind === "desc" && S.sheet.type === "lapor") suggestFromText();
+  if (el.dataset.bind === "desc" && S.sheet.type === "lapor") {
+    suggestFromText();
+    // Only the bottom bar: re-rendering the sheet would drop the keyboard.
+    // Without this, "Simpan" stayed disabled for a Lainnya until the next tap.
+    const foot = document.querySelector("#sheet-root .sheet-foot");
+    if (foot) foot.outerHTML = laporFoot(S.sheet);
+  }
   if (el.dataset.bind === "rdate" || el.dataset.bind === "rnotes") return;
 });
 
@@ -1186,12 +1192,14 @@ function listPane(s) {
       return `<div class="stack">${html}</div>`;
     }
     html += `<span class="eyebrow">Semua jenis masalah</span><div class="chips">${cats.map((c) => `<button class="chip ${c === cat ? "on" : ""}" style="min-height:40px;font-size:14px" data-act="l-allcat" data-v="${esc(c)}">${esc(c.replace("_", " "))}</button>`).join("")}</div>`;
-    html += fmList(newIssueModes(cat ? [cat] : null), s);
-    return `<div class="stack">${html}</div>`;
+    html += fmList(newIssueModes(cat ? [cat] : null), s, cat ? cat.replace("_", " ") : null);
+    // falls through to the location + note below: this list used to return
+    // here, so a "Lainnya" picked from it could never be saved (no note box).
+  } else {
+    if (zone.group) html += zoneParts(s, zone);
+    else html += `<span class="eyebrow">Pilih langsung</span>` + fmList(newIssueModes(zone.cats), s, zone.label);
+    html += `<button class="btn btn-plain btn-block" data-act="l-all">Tidak ada di gambar</button>`;
   }
-  if (zone.group) html += zoneParts(s, zone);
-  else html += `<span class="eyebrow">Pilih langsung</span>` + fmList(newIssueModes(zone.cats), s);
-  html += `<button class="btn btn-plain btn-block" data-act="l-all">Tidak ada di gambar</button>`;
   if (!r) html += `<span class="eyebrow">Lokasi truk</span><div class="seg">${Object.keys(LOCATION_LABELS).map((k) => `<button class="${s.loc === k ? "on" : ""}" data-act="l-loc" data-v="${k}">${LOCATION_LABELS[k]}</button>`).join("")}</div>`;
   html += `<span class="eyebrow">Catatan (boleh pakai mic di keyboard)</span><textarea class="field" data-bind="desc" placeholder="mis. selang putus, sementara disumbat">${esc(s.desc)}</textarea>`;
   if (s.suggestion && (!s.pick || s.pick.fmId !== s.suggestion.id)) html += `<div class="suggest">Mungkin: <b>${esc(s.suggestion.name)}</b><button data-act="l-suggest">Pakai</button></div>`;
@@ -1227,14 +1235,20 @@ function zoneParts(s, zone) {
   if (pi === 0) {
     const onPhotos = new Set(pages.flatMap((p) => (p.parts || []).map((x) => x.fm)));
     const rest = newIssueModes(zone.cats).filter((f) => !onPhotos.has(f.name) && !CRACK_FMS.includes(f.name) && !WHEEL_CHOICES.includes(f.name) && !BRAKE_CHOICES.includes(f.name));
-    if (rest.length) html += `<span class="eyebrow" style="margin-top:6px">Masalah lain di bagian ini</span>` + fmList(rest, s);
+    html += `<span class="eyebrow" style="margin-top:6px">Masalah lain di bagian ini</span>` + fmList(rest, s, zone.label);
   }
   return html;
 }
-function fmList(list, s) {
+// `where` (a category or zone name) adds a "Lainnya" row at the end: every
+// list needs a way out when the problem isn't on it, and `where` is saved as
+// the location note so the Lainnya still says which part of the truck.
+function fmList(list, s, where) {
+  const other = where && fmByName("Lainnya");
+  if (other && !list.some((f) => f.id === other.id)) list = [...list, other];
   return `<div class="group">${list.map((f) => {
     const sel = s.pick && s.pick.fmId === f.id;
-    return `<button class="row ${sel ? "selected" : ""}" data-act="l-fm" data-id="${esc(f.id)}"><span class="grow"><span class="title" style="font-weight:${sel ? 600 : 500}">${esc(f.name)}</span></span>${sel ? `<svg width="20" height="16" viewBox="0 0 22 18" aria-label="dipilih"><path d="M2 9l6 6L20 3" fill="none" stroke="#8B1A1A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>` : ""}</button>`;
+    const name = where && f.name === "Lainnya" ? "Lainnya — tulis sendiri di catatan" : f.name;
+    return `<button class="row ${sel ? "selected" : ""}" data-act="l-fm" data-id="${esc(f.id)}"${where ? ` data-where="${esc(where)}"` : ""}><span class="grow"><span class="title" style="font-weight:${sel ? 600 : 500}">${esc(name)}</span></span>${sel ? `<svg width="20" height="16" viewBox="0 0 22 18" aria-label="dipilih"><path d="M2 9l6 6L20 3" fill="none" stroke="#8B1A1A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>` : ""}</button>`;
   }).join("") || `<div class="empty-note">Tidak ada.</div>`}</div>`;
 }
 function laporFoot(s) {
@@ -1369,7 +1383,13 @@ function sheetAction(a, el) {
     case "l-all": s.all = true; s.allCat = null; s.pop = null; rerender(); return;
     case "l-allcat": s.allCat = d.v; rerender(); return;
     case "l-loc": s.loc = d.v; rerender(); return;
-    case "l-fm": { const f = fmById(d.id); s.pick = { fmId: f.id, fmName: f.name, label: f.name }; rerender(); return; }
+    case "l-fm": {
+      const f = fmById(d.id);
+      const other = f.name === "Lainnya";
+      s.pick = { fmId: f.id, fmName: f.name, label: other && d.where ? d.where + " · Lainnya" : f.name, chassis_position: other ? d.where || null : null };
+      if (other) s.focus = "desc";
+      rerender(); return;
+    }
     case "l-suggest": { const f = fmById(s.suggestion.id); if (f) s.pick = { fmId: f.id, fmName: f.name, label: f.name }; rerender(); return; }
     case "l-part": {
       const page = GROUPS[s.group][s.page];
