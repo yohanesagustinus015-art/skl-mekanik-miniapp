@@ -154,6 +154,7 @@ textarea.field { min-height: 88px; resize: vertical; }
 .photo.crackable img { cursor: crosshair; }
 .crack { position: absolute; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%; background: var(--accent); border: 2px solid #fff; box-shadow: 0 1px 4px rgba(43,36,32,.4); pointer-events: none; }
 .pop.low { top: 76%; } .pop.high { top: 24%; }
+.pop { max-height: 92%; overflow-y: auto; }
 .crack.new { width: 24px; height: 24px; margin: -12px 0 0 -12px; background: rgba(139,26,26,.35); border: 3px solid var(--accent); }
 /* Callouts: a dot exactly where the dashboard puts the part, and its label
    placed by placeLabels() wherever it fits, joined by a line drawn from the
@@ -1148,7 +1149,7 @@ function photoPane(s) {
     const sel = s.pick && s.pick.wheel_position === w.code;
     return `<button class="spot ${c ? "open" : ""} ${sel ? "sel" : ""}" style="left:${w.left}%;top:${w.top}%" data-act="l-wheel" data-v="${n}">${w.num}</button>`;
   }).join("") + (page.crack ? crackDots(s) : "");
-  const pop = s.pop ? `<div class="pop ${s.pop.crackAt ? (s.pop.crackAt.top_pct < 50 ? "low" : "high") : ""}"><div class="h"><span>${esc(s.pop.title)} — apa masalahnya?</span><button class="linkbtn" data-act="l-pop-close" aria-label="Tutup">Tutup</button></div>${s.pop.choices.map((c, n) => fmByName(c) ? `<button class="choice" data-act="l-pop-pick" data-v="${n}">${esc(c)}</button>` : "").join("")}</div>` : "";
+  const pop = s.pop ? `<div class="pop ${s.pop.crackAt ? (s.pop.crackAt.top_pct < 50 ? "low" : "high") : ""}"><div class="h"><span>${esc(s.pop.title)} — apa masalahnya?</span><button class="linkbtn" data-act="l-pop-close" aria-label="Tutup">Tutup</button></div>${s.pop.choices.map((c, n) => fmByName(c) ? `<button class="choice" data-act="l-pop-pick" data-v="${n}">${c === "Lainnya" ? "Lainnya — tulis sendiri di catatan" : esc(c)}</button>` : "").join("")}</div>` : "";
   const hint = page.crack ? `<span class="hint">Tekan tepat di tempat retaknya. Titik merah = retak yang pernah dicatat di truk ini.</span>` : "";
   return `<div class="stack"><div class="crumbs"><button data-act="l-up">${esc(tname)}</button><span class="sep">›</span><b>${esc(zone ? zone.label : "")}</b>${pages.length > 1 ? `<span class="sep">›</span><span class="sub">${esc(page.title)}</span>` : ""}</div>
     ${thumbs}<div class="photo ${page.crack ? "crackable" : ""}"><img src="${img(page.src)}" alt="${esc(page.title)}" ${page.crack ? `data-act="l-crack"` : ""}>${spots}${pop}</div>${hint}</div>`;
@@ -1198,8 +1199,15 @@ function listPane(s) {
 }
 // The list follows the photo on screen: its parts, in the same order as
 // the dots. On a close-up, a row at the top goes back to the zone's first
-// photo; on the first photo, rows open the close-ups that no dot opens.
+// photo (the thumbnails above the photo reach every close-up).
 // Problem types no photo shows sit at the bottom of the first photo.
+// The problems offered for a tapped part: its usual one first, then the
+// other problems of the same kind, then "Lainnya" to write it in the note.
+function partChoices(p) {
+  const f = fmByName(p.fm);
+  const same = f ? newIssueModes([f.category]).map((x) => x.name).filter((n) => !CRACK_FMS.includes(n)) : [];
+  return [p.fm, ...same, "Lainnya"].filter((n, i, a) => fmByName(n) && a.indexOf(n) === i);
+}
 function zoneParts(s, zone) {
   const pages = GROUPS[zone.group];
   const pi = pages[s.page] ? s.page : 0;
@@ -1210,18 +1218,13 @@ function zoneParts(s, zone) {
   }
   const rows = (pg.parts || []).map((p, n) => {
     const sel = s.pick && s.pick.spot === pg.imageKey + ":" + n;
-    const sub = p.opensPage != null ? "Lihat foto detail ›" : p.routine ? "Servis rutin — catat ganti" : p.brake ? "Rem — pilih masalahnya" : p.fm;
+    const sub = p.opensPage != null ? "Lihat foto detail ›" : p.routine ? "Servis rutin — catat ganti" : sel ? s.pick.fmName : "Pilih masalahnya";
     return `<button class="row ${sel ? "selected" : ""}" data-act="l-part" data-v="${n}"><span class="grow"><span class="title">${esc(p.label)}</span><span class="meta">${esc(sub)}</span></span>${chevron()}</button>`;
   });
   if ((pg.wheels || []).length) rows.push(`<div class="row"><span class="grow"><span class="meta">Tekan nomor roda di foto.</span></span></div>`);
   if (pg.crack) rows.push(`<div class="row"><span class="grow"><span class="meta">Chassis retak? Tekan tempat retaknya di foto.</span></span></div>`);
   if (rows.length) html += `<span class="eyebrow" style="margin-top:6px">${esc(pg.title)}</span><div class="group">${rows.join("")}</div>`;
   if (pi === 0) {
-    const opened = new Set((pg.parts || []).filter((p) => p.opensPage != null).map((p) => p.opensPage));
-    const others = pages.map((p, k) => k).filter((k) => k > 0 && !opened.has(k));
-    if (others.length) {
-      html += `<span class="eyebrow" style="margin-top:6px">Foto detail</span><div class="group">${others.map((k) => `<button class="row" data-act="l-page" data-v="${k}"><span class="grow"><span class="title">${esc(pages[k].title)}</span></span>${chevron()}</button>`).join("")}</div>`;
-    }
     const onPhotos = new Set(pages.flatMap((p) => (p.parts || []).map((x) => x.fm)));
     const rest = newIssueModes(zone.cats).filter((f) => !onPhotos.has(f.name) && !CRACK_FMS.includes(f.name) && !WHEEL_CHOICES.includes(f.name) && !BRAKE_CHOICES.includes(f.name));
     if (rest.length) html += `<span class="eyebrow" style="margin-top:6px">Masalah lain di bagian ini</span>` + fmList(rest, s);
@@ -1375,14 +1378,15 @@ function sheetAction(a, el) {
       // The photo shows one fuel-filter spot but the truck has two filters
       // (primer + utama) -- let them pick which, rather than guess.
       if (p.routine) { Object.assign(s, { tab: "rutin", rItem: p.routine === "filter_solar" ? null : p.routine }); rerender(); loadRoutineLast(s); return; }
-      if (p.brake) { s.pop = { title: p.label, choices: BRAKE_CHOICES, positionId: p.id, label: p.label, spot: page.imageKey + ":" + d.v }; rerender(); return; }
-      const f = fmByName(p.fm);
-      if (!f) { toast("Jenis masalah ini belum ada di katalog."); return; }
-      // Which dot, not just which problem: two dots can share a problem type.
-      s.pick = { fmId: f.id, fmName: f.name, component_position: p.id || null, spot: page.imageKey + ":" + d.v, label: p.label + (p.label !== f.name ? " · " + f.name : "") };
-      s.pop = null; rerender(); return;
+      // A dot names a PLACE; the problem there is asked, not assumed (the
+      // radiator may be overheating, not leaking). A dot with no coded
+      // position keeps its name as the location note (chassis_position, the
+      // free-text "where" field) so the place isn't lost.
+      s.pop = { title: p.label, choices: p.brake ? [...BRAKE_CHOICES, "Lainnya"] : partChoices(p),
+        positionId: p.id, posText: p.id ? null : p.label, label: p.label, spot: page.imageKey + ":" + d.v };
+      rerender(); return;
     }
-    case "l-wheel": { const w = GROUPS[s.group][s.page].wheels[Number(d.v)]; s.pop = { title: "Roda " + w.num, choices: WHEEL_CHOICES, wheelCode: w.code, label: "Roda " + w.num }; rerender(); return; }
+    case "l-wheel": { const w = GROUPS[s.group][s.page].wheels[Number(d.v)]; s.pop = { title: "Roda " + w.num, choices: [...WHEEL_CHOICES, "Lainnya"], wheelCode: w.code, label: "Roda " + w.num }; rerender(); return; }
     case "l-pos": {
       const p = posByKey(s.pick.fmId, d.k);
       if (!p) return;
@@ -1401,7 +1405,9 @@ function sheetAction(a, el) {
       const f = fmByName(s.pop.choices[Number(d.v)]);
       const c = s.pop.crackAt;
       if (f && c) s.pick = { fmId: f.id, fmName: f.name, label: "Rangka · " + f.name, chassis_position: `Rangka ${Math.round(c.left_pct)}% ${Math.round(c.top_pct)}%`, crack_point: c };
-      else if (f) s.pick = { fmId: f.id, fmName: f.name, component_position: s.pop.positionId || null, wheel_position: s.pop.wheelCode || null, spot: s.pop.spot || null, label: s.pop.label + " · " + f.name };
+      else if (f) s.pick = { fmId: f.id, fmName: f.name, component_position: s.pop.positionId || null, wheel_position: s.pop.wheelCode || null, chassis_position: s.pop.posText || null, spot: s.pop.spot || null, label: s.pop.label + " · " + f.name };
+      // "Lainnya" needs the note written -- put the cursor there.
+      if (f && f.name === "Lainnya") s.focus = "desc";
       s.pop = null; rerender(); return;
     }
     case "l-existing": { const tid = s.truckId; closeSheet(); S.truckId = tid; S.view = "truck"; render(); return; }
@@ -1502,6 +1508,16 @@ function makeDemo() {
     fm("f9", "Ban bocor/pecah", "ban"), fm("f10", "Baud roda kendor/patah", "ban"), fm("f11", "Velg rusak/penyok", "ban"), fm("f12", "Aki soak", "kelistrikan"),
     fm("f13", "Turbo rusak", "mesin"), fm("f14", "Kebocoran oli", "mesin"), fm("f15", "Lainnya", "lainnya"), fm("f16", "Kopel/as kopel rusak", "transmisi"), fm("f17", "Shockbreaker rusak", "chassis"),
     fm("f18", "Chassis retak/las", "chassis"), fm("f19", "Chassis retak/lakop", "chassis"),
+    // The rest of the real catalog (failure_modes, active), so every dot works in the demo.
+    ...[["Tangki BBM bocor/rusak", "bahan_bakar"], ["Bak/lantai rusak", "bak"], ["As roda/gardan rusak", "chassis"],
+      ["Kaki-kaki/tie rod rusak", "chassis"], ["Power steering bermasalah", "chassis"], ["AC tidak dingin", "kabin"],
+      ["Dashboard/panel rusak", "kabin"], ["Jok/kursi rusak", "kabin"], ["Kaca pecah/retak", "kabin"], ["Wiper rusak", "kabin"],
+      ["Alternator/dinamo rusak", "kelistrikan"], ["Dinamo starter rusak", "kelistrikan"], ["Kelistrikan lain", "kelistrikan"],
+      ["Kepala aki kendor/korosi", "kelistrikan"], ["Lampu/sein mati", "kelistrikan"], ["Kruk as rusak", "mesin"],
+      ["Mesin mogok/tidak nyala", "mesin"], ["Mesin overheat", "mesin"], ["Pompa air (water pump) bocor", "mesin"],
+      ["Pompa hidrolik bocor/rusak", "mesin"], ["Pompa injeksi/injektor bermasalah", "mesin"], ["Radiator bocor", "mesin"],
+      ["Master kopling bocor/rusak", "transmisi"], ["Ganti filter oli", "mesin"], ["Ganti filter solar", "bahan_bakar"]]
+      .map(([name, cat], i) => fm("c" + i, name, cat)),
   ];
   const f = (id) => failureModes.find((x) => x.id === id);
   const mechanics = [{ id: "m-oki", name: "Oki" }, { id: "m-surady", name: "Surady" }];
