@@ -94,7 +94,11 @@ textarea.field { min-height: 88px; resize: vertical; }
 .avatar { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 18px; background: var(--accent); color: #fff; font-family: var(--display); font-weight: 600; }
 .avatar.alt { background: var(--surface3); color: var(--text); }
 .split { flex: 1; display: grid; grid-template-columns: 400px minmax(0, 1fr); min-height: 0; }
-.side { background: var(--surface2); border-right: 1px solid var(--border); display: flex; flex-direction: column; gap: 14px; padding: 20px 16px 24px; overflow-y: auto; height: 100vh; position: sticky; top: 0; }
+.side { background: var(--surface2); border-right: 1px solid var(--border); display: flex; flex-direction: column; gap: 14px; padding: 20px 16px 24px; overflow-y: auto; height: 100vh; height: 100dvh; position: sticky; top: 0; }
+/* Sections keep their full height and the panel scrolls: as a flex column
+   the side shrank each section to fit, and on a landscape tablet (~500px
+   tall) "Perlu kerja" was clipped after its second truck. */
+.side > * { flex-shrink: 0; }
 .main { padding: 20px 32px 32px; display: flex; flex-direction: column; gap: 18px; min-width: 0; }
 .narrow-body { flex: 1; padding: 8px 16px 110px; display: flex; flex-direction: column; gap: 14px; }
 .tabbar { position: fixed; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(3, 1fr); background: rgba(255,255,255,.96); backdrop-filter: blur(12px); border-top: 1px solid var(--border); padding-bottom: env(safe-area-inset-bottom); z-index: 20; }
