@@ -151,14 +151,16 @@ textarea.field { min-height: 88px; resize: vertical; }
 .crack { position: absolute; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%; background: var(--accent); border: 2px solid #fff; box-shadow: 0 1px 4px rgba(43,36,32,.4); pointer-events: none; }
 .pop.low { top: 76%; } .pop.high { top: 24%; }
 .crack.new { width: 24px; height: 24px; margin: -12px 0 0 -12px; background: rgba(139,26,26,.35); border: 3px solid var(--accent); }
-/* Pin: the dot sits exactly where the dashboard puts the part, the label
-   floats above it on a short stem (lifted further when labels collide). */
-.spot.pin { transform: translate(calc(-50% + var(--dx, 0px)), calc(-100% - 12px - var(--lift, 0px))); }
-.spot.pin::before { content: ""; position: absolute; left: calc(50% - var(--dx, 0px)); top: 100%; width: 2px; margin-left: -1px; height: calc(8px + var(--lift, 0px)); background: rgba(43,36,32,.55); }
-.spot.pin::after { content: ""; box-sizing: border-box; position: absolute; left: calc(50% - var(--dx, 0px)); top: calc(100% + 6px + var(--lift, 0px)); width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; background: var(--accent); border: 2px solid #fff; box-shadow: 0 1px 3px rgba(43,36,32,.45); }
-.spot.pin.below { transform: translate(calc(-50% + var(--dx, 0px)), 12px); }
-.spot.pin.below::before { top: auto; bottom: 100%; height: 8px; }
-.spot.pin.below::after { top: auto; bottom: calc(100% + 6px); }
+/* Callouts: a dot exactly where the dashboard puts the part, and its label
+   placed by placeLabels() wherever it fits, joined by a line drawn from the
+   dot to the label's nearest edge. Both are buttons, so either can be tapped. */
+.pdot { position: absolute; width: 34px; height: 34px; margin: -17px 0 0 -17px; padding: 0; border: 0; background: transparent; z-index: 3; }
+.pdot::after { content: ""; position: absolute; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; box-sizing: border-box; border-radius: 50%; background: var(--accent); border: 2px solid #fff; box-shadow: 0 1px 3px rgba(43,36,32,.45); }
+.pdot.sel::after { width: 20px; height: 20px; margin: -10px 0 0 -10px; border: 3px solid var(--text); }
+.spot.plabel { transform: translate(-50%, calc(-100% - 16px)); z-index: 2; }
+.spot.plabel.placed { transform: none; }
+.leaders { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+.leaders line { stroke: rgba(43,36,32,.7); stroke-width: 1.5; }
 .spot .n { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px; border-radius: 11px; background: #fff; color: var(--accent); font-size: 12px; font-weight: 700; }
 .thumbs { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(112px, 1fr); gap: 8px; overflow-x: auto; padding-bottom: 2px; }
 .thumb { display: flex; flex-direction: column; gap: 5px; padding: 5px; border-radius: 12px; background: var(--surface); text-align: left; }
@@ -212,11 +214,9 @@ textarea.field { min-height: 88px; resize: vertical; }
    a thumb-sized tap area; only the chosen one shows its name. The list
    under the photo names them all. */
 @media (max-width: 599px) {
-  .spot.pin:not(.sel) { width: 40px; height: 40px; min-height: 0; padding: 0; font-size: 0; background: transparent; box-shadow: none; transform: translate(-50%, -50%); justify-content: center; }
-  .spot.pin:not(.sel)::before { display: none; }
-  .spot.pin:not(.sel)::after { top: 50%; left: 50%; width: 16px; height: 16px; margin: -8px 0 0 -8px; }
-  .spot.pin.open:not(.sel)::after { width: 22px; height: 22px; margin: -11px 0 0 -11px; }
-  .spot.pin:not(.sel) .n { position: absolute; z-index: 1; top: 50%; left: 50%; transform: translate(-50%, -50%); min-width: 18px; height: 18px; font-size: 11px; background: transparent; color: #fff; }
+  .spot.plabel:not(.sel) { display: none; }
+  .pdot .n { position: absolute; z-index: 1; left: 50%; top: 50%; transform: translate(-50%, -50%); min-width: 0; height: auto; background: transparent; color: #fff; font-size: 10px; }
+  .pdot.open::after { width: 22px; height: 22px; margin: -11px 0 0 -11px; }
 }
 @media (min-width: 900px) {
   .tabbar { display: none; }
@@ -968,55 +968,91 @@ function renderSheet() {
   if (nb && !first) nb.scrollTop = scrollTop;
   const ta = root.querySelector("textarea[data-bind]");
   if (ta && s.focus === ta.dataset.bind) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
-  root.querySelectorAll(".photo img").forEach((im) => { if (im.complete) nudgeSpots(im.parentNode); else im.addEventListener("load", () => nudgeSpots(im.parentNode), { once: true }); });
-}
-// Labels are much bigger than the dashboard's dots, so neighbours collide.
-// The dots never move. Lowest labels keep their place; a colliding label
-// is lifted higher on its stem, or else hangs below its dot, or else slides
-// sideways -- whichever first lands clear and inside the photo.
-function nudgeSpots(photo) {
-  const all = [...photo.querySelectorAll(".spot.pin")];
-  all.forEach((el) => { el.style.removeProperty("--lift"); el.style.removeProperty("--dx"); el.classList.remove("below"); });
-  // On a phone only the chosen part carries a label (see the CSS).
-  const pins = matchMedia("(max-width: 599px)").matches ? all.filter((el) => el.classList.contains("sel")) : all;
-  const pr = photo.getBoundingClientRect();
-  const placed = [];
-  const inside = (r) => r.left >= pr.left + 2 && r.right <= pr.right - 2 && r.top >= pr.top + 2 && r.bottom <= pr.bottom - 2;
-  const hitOf = (r) => placed.find((a) => a.left < r.right - 2 && r.left < a.right - 2 && r.top < a.bottom + 2 && r.bottom > a.top - 2);
-  const at = (r, dx, dy) => ({ left: r.left + dx, right: r.right + dx, top: r.top + dy, bottom: r.bottom + dy });
-  pins.map((el) => ({ el, r: el.getBoundingClientRect() })).sort((a, b) => b.r.bottom - a.r.bottom).forEach(({ el, r }) => {
-    const h = r.bottom - r.top;
-    const edgeDx = r.left < pr.left + 4 ? pr.left + 4 - r.left : r.right > pr.right - 4 ? pr.right - 4 - r.right : 0;
-    const belowDy = h + 24; // label under the dot: dot sits 12px from either edge
-    const liftAt = (dx) => {
-      let lift = 0;
-      for (let k = 0; k < 8; k++) {
-        const hit = hitOf(at(r, dx, -lift));
-        if (!hit) break;
-        lift += r.bottom - lift - (hit.top - 4);
-      }
-      return lift;
-    };
-    const sides = [30, 60, 90, 120].flatMap((d) => [edgeDx + d, edgeDx - d]);
-    const tries = [
-      { dx: edgeDx, lift: liftAt(edgeDx), below: false },
-      { dx: edgeDx, lift: 0, below: true },
-      ...sides.map((dx) => ({ dx, lift: 0, below: false })),
-      ...sides.map((dx) => ({ dx, lift: liftAt(dx), below: false })),
-      ...sides.map((dx) => ({ dx, lift: 0, below: true })),
-    ];
-    const rectOf = (t) => at(r, t.dx, t.below ? belowDy : -t.lift);
-    // Nothing fully clear (a crowded close-up): least overlap wins.
-    const clash = (q) => placed.reduce((sum, a) => sum + Math.max(0, Math.min(a.right, q.right) - Math.max(a.left, q.left)) * Math.max(0, Math.min(a.bottom, q.bottom) - Math.max(a.top, q.top)), 0);
-    const score = (t) => clash(rectOf(t)) + (inside(rectOf(t)) ? 0 : 1e9);
-    const pick = tries.find((t) => inside(rectOf(t)) && !hitOf(rectOf(t)))
-      || tries.reduce((best, t) => (score(t) < score(best) ? t : best), tries[0]);
-    if (pick.dx) el.style.setProperty("--dx", pick.dx + "px");
-    if (pick.below) el.classList.add("below");
-    else if (pick.lift) el.style.setProperty("--lift", pick.lift + "px");
-    placed.push(rectOf(pick));
+  // Place labels once the photo has its size, and again whenever it changes
+  // (image finishing loading, rotating the tablet, resizing the window).
+  photoObserver.disconnect();
+  root.querySelectorAll(".photo").forEach((ph) => {
+    const im = ph.querySelector("img");
+    if (im.complete && im.naturalWidth) placeLabels(ph);
+    else im.addEventListener("load", () => placeLabels(ph), { once: true });
+    photoObserver.observe(ph);
   });
 }
+// Labels are much bigger than the dashboard's dots, so they can't all sit
+// on top of their part. Each label tries spots around its dot -- near
+// first, above first -- and takes the one that overlaps nothing: no other
+// label, no other dot, and its line crosses no other label or line. The
+// most crowded dots choose first. Lines run from the dot to the label's
+// nearest edge, so a label is never cut off from its dot.
+function placeLabels(photo) {
+  photo.querySelectorAll(".leaders").forEach((el) => el.remove());
+  const W = photo.clientWidth, H = photo.clientHeight;
+  if (!W || !H) return;
+  const labels = [...photo.querySelectorAll(".spot.plabel")].filter((el) => getComputedStyle(el).display !== "none");
+  const anchors = [...photo.querySelectorAll(".pdot")].map((d) => ({ x: parseFloat(d.style.left) / 100 * W, y: parseFloat(d.style.top) / 100 * H }));
+  const DIRS = [[0, -1], [-1, -1], [1, -1], [1, 0], [-1, 0], [0, 1], [-1, 1], [1, 1]];
+  const items = labels.map((el) => {
+    el.classList.remove("placed");
+    return { el, ax: parseFloat(el.dataset.x) / 100 * W, ay: parseFloat(el.dataset.y) / 100 * H, w: el.offsetWidth, h: el.offsetHeight };
+  });
+  const near = (it) => anchors.filter((a) => Math.abs(a.x - it.ax) < 160 && Math.abs(a.y - it.ay) < 110).length;
+  // Labels with the fewest close spots inside the photo (near an edge) pick
+  // first, then the most crowded ones.
+  const roomy = (it) => DIRS.filter(([ux, uy]) => {
+    const cx = it.ax + ux * (24 + it.w / 2), cy = it.ay + uy * (24 + it.h / 2);
+    return cx - it.w / 2 >= 4 && cy - it.h / 2 >= 4 && cx + it.w / 2 <= W - 4 && cy + it.h / 2 <= H - 4;
+  }).length;
+  items.forEach((it) => { it.room = roomy(it); it.near = near(it); });
+  items.sort((a, b) => a.room - b.room || b.near - a.near);
+  const overlap = (a, b) => Math.max(0, Math.min(a.x2, b.x2) - Math.max(a.x1, b.x1)) * Math.max(0, Math.min(a.y2, b.y2) - Math.max(a.y1, b.y1));
+  const grow = (b, m) => ({ x1: b.x1 - m, y1: b.y1 - m, x2: b.x2 + m, y2: b.y2 + m });
+  const endOf = (it, b) => ({ x: Math.min(Math.max(it.ax, b.x1), b.x2), y: Math.min(Math.max(it.ay, b.y1), b.y2) });
+  // Does segment p-q pass through box b? (Liang-Barsky clipping)
+  const segHitsBox = (p, q, b) => {
+    let t0 = 0, t1 = 1;
+    const dx = q.x - p.x, dy = q.y - p.y;
+    for (const [pp, qq] of [[-dx, p.x - b.x1], [dx, b.x2 - p.x], [-dy, p.y - b.y1], [dy, b.y2 - p.y]]) {
+      if (pp === 0) { if (qq < 0) return false; continue; }
+      const t = qq / pp;
+      if (pp < 0) { if (t > t1) return false; if (t > t0) t0 = t; } else { if (t < t0) return false; if (t < t1) t1 = t; }
+    }
+    return t1 - t0 > 0.02;
+  };
+  const cross = (a, b, c, d) => {
+    const o = (p, q, r) => Math.sign((q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x));
+    return o(a, b, c) * o(a, b, d) < 0 && o(c, d, a) * o(c, d, b) < 0;
+  };
+  const placed = [];
+  items.forEach((it) => {
+    let best = null;
+    [14, 34, 60, 95, 135].forEach((r, ri) => DIRS.forEach(([ux, uy], di) => {
+      const cx = it.ax + ux * (r + it.w / 2), cy = it.ay + uy * (r + it.h / 2);
+      const b = { x1: cx - it.w / 2, y1: cy - it.h / 2, x2: cx + it.w / 2, y2: cy + it.h / 2 };
+      const a = { x: it.ax, y: it.ay }, end = endOf(it, b);
+      let score = ri * 250 + di * 12; // near beats far; above beats below
+      if (b.x1 < 4 || b.y1 < 4 || b.x2 > W - 4 || b.y2 > H - 4) score += 1e6;
+      placed.forEach((o) => {
+        score += overlap(grow(b, 3), o.box) * 20;
+        if (segHitsBox(a, end, o.box)) score += 4000;
+        if (segHitsBox(o.a, o.end, b)) score += 4000;
+        if (cross(a, end, o.a, o.end)) score += 1500;
+      });
+      anchors.forEach((d) => {
+        if (d.x === it.ax && d.y === it.ay) return;
+        score += overlap(b, { x1: d.x - 9, y1: d.y - 9, x2: d.x + 9, y2: d.y + 9 }) * 30;
+        if (segHitsBox(a, end, { x1: d.x - 6, y1: d.y - 6, x2: d.x + 6, y2: d.y + 6 })) score += 800;
+      });
+      if (!best || score < best.score) best = { score, box: b, a, end };
+    }));
+    it.el.style.left = best.box.x1 + "px";
+    it.el.style.top = best.box.y1 + "px";
+    it.el.classList.add("placed");
+    placed.push(best);
+  });
+  const lines = placed.map((p) => `<line x1="${p.a.x}" y1="${p.a.y}" x2="${p.end.x}" y2="${p.end.y}"/>`).join("");
+  photo.querySelector("img").insertAdjacentHTML("afterend", `<svg class="leaders" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${lines}</svg>`);
+}
+const photoObserver = new ResizeObserver((entries) => entries.forEach((e) => placeLabels(e.target)));
 function sheetHead(title, right = "") {
   return `<div class="sheet-head"><button data-act="sheet-close">Batal</button><span class="t">${title}</span><span style="justify-self:end">${right}</span></div>`;
 }
@@ -1053,6 +1089,13 @@ function laporView(s) {
   return sheetHead(title) + `<div class="sheet-body">${tabs}${trucks}${s.truckId ? `<div class="lapor-grid">${photoPane(s)}${listPane(s)}</div>` : `<div class="hint">Pilih truknya dulu.</div>`}</div>${laporFoot(s)}`;
 }
 
+// One labelled point on a photo: the dot and its label are both buttons for
+// the same action; placeLabels() positions the label and draws the line.
+function callout({ x, y, act, v, label, n, sel, zone }) {
+  const cls = `${n ? "open" : ""} ${sel ? "sel" : ""}`;
+  return `<button class="pdot ${cls}" style="left:${x}%;top:${y}%" data-act="${act}" data-v="${v}" aria-label="${esc(label)}">${n ? `<span class="n">${n}</span>` : ""}</button>`
+    + `<button class="spot plabel ${zone ? "zone" : ""} ${cls}" style="left:${x}%;top:${y}%" data-x="${x}" data-y="${y}" data-act="${act}" data-v="${v}">${n ? `<span class="n">${n}</span>` : ""}${esc(label)}</button>`;
+}
 function photoPane(s) {
   const tname = (() => { const t = (S.data.trucks || []).find((x) => x.id === s.truckId); return t ? "Truk " + (t.nickname || t.id) : ""; })();
   const openIs = openIssuesOnTruck(s.truckId);
@@ -1061,7 +1104,7 @@ function photoPane(s) {
   if (!s.group) {
     const spots = ZONES.map((z) => {
       const n = openIs.filter((i) => z.cats.includes(i.failure_modes && i.failure_modes.category)).length;
-      return `<button class="spot pin zone ${n ? "open" : ""} ${s.zone === z.key ? "sel" : ""}" style="left:${z.left}%;top:${z.top}%" data-act="l-zone" data-v="${z.key}">${n ? `<span class="n">${n}</span>` : ""}${esc(z.label)}</button>`;
+      return callout({ x: z.left, y: z.top, act: "l-zone", v: z.key, label: z.label, n, sel: s.zone === z.key, zone: true });
     }).join("");
     return `<div class="stack"><div class="crumbs"><b>${esc(tname)}</b><button data-act="l-ganti">Ganti</button><span class="sep">›</span><span class="sub">Tekan bagian truk</span></div>
       <div class="photo"><img src="${img("truck-side.jpg")}" alt="Truk tampak samping">${spots}</div>
@@ -1078,7 +1121,7 @@ function photoPane(s) {
   const spots = (page.parts || []).map((p, n) => {
     const c = p.id ? openAt(p.id) : 0;
     const sel = s.pick && (s.pick.spot ? s.pick.spot === page.imageKey + ":" + n : !!p.id && s.pick.component_position === p.id);
-    return `<button class="spot pin ${c ? "open" : ""} ${sel ? "sel" : ""}" style="left:${p.left}%;top:${p.top}%" data-act="l-part" data-v="${n}">${c ? `<span class="n">${c}</span>` : ""}${esc(p.label)}</button>`;
+    return callout({ x: p.left, y: p.top, act: "l-part", v: n, label: p.label, n: c, sel });
   }).join("") + (page.wheels || []).map((w, n) => {
     const c = openAt(w.code);
     const sel = s.pick && s.pick.wheel_position === w.code;
@@ -1124,23 +1167,38 @@ function listPane(s) {
     html += fmList(newIssueModes(cat ? [cat] : null), s);
     return `<div class="stack">${html}</div>`;
   }
-  html += `<span class="eyebrow">${s.group ? "Di foto ini" : "Pilih langsung"}</span>`;
-  if (s.group) {
-    const page = GROUPS[s.group][s.page] || GROUPS[s.group][0];
-    html += `<div class="group">${(page.parts || []).map((p, n) => {
-      const sel = s.pick && (s.pick.spot ? s.pick.spot === page.imageKey + ":" + n : !!p.id && s.pick.component_position === p.id);
-      const sub = p.routine ? "Servis rutin — catat ganti" : p.brake ? "Rem — pilih masalahnya" : p.fm;
-      return `<button class="row ${sel ? "selected" : ""}" data-act="l-part" data-v="${n}"><span class="grow"><span class="title">${esc(p.label)}</span><span class="meta">${esc(sub)}</span></span>${chevron()}</button>`;
-    }).join("")}${(page.wheels || []).length ? `<div class="row"><span class="grow"><span class="meta">Tekan nomor roda di foto.</span></span></div>` : ""}${page.crack ? `<div class="row"><span class="grow"><span class="meta">Chassis retak? Tekan tempat retaknya di foto.</span></span></div>` : ""}</div>`;
-  } else {
-    html += fmList(newIssueModes(zone.cats), s);
-    if (zone.group) html += `<button class="btn btn-dark btn-block" data-act="l-into">Tunjuk di foto ${esc(zone.label.toLowerCase())} ›</button>`;
-  }
+  if (zone.group) html += zoneParts(s, zone);
+  else html += `<span class="eyebrow">Pilih langsung</span>` + fmList(newIssueModes(zone.cats), s);
   html += `<button class="btn btn-plain btn-block" data-act="l-all">Tidak ada di gambar</button>`;
   if (!r) html += `<span class="eyebrow">Lokasi truk</span><div class="seg">${Object.keys(LOCATION_LABELS).map((k) => `<button class="${s.loc === k ? "on" : ""}" data-act="l-loc" data-v="${k}">${LOCATION_LABELS[k]}</button>`).join("")}</div>`;
   html += `<span class="eyebrow">Catatan (boleh pakai mic di keyboard)</span><textarea class="field" data-bind="desc" placeholder="mis. selang putus, sementara disumbat">${esc(s.desc)}</textarea>`;
   if (s.suggestion && (!s.pick || s.pick.fmId !== s.suggestion.id)) html += `<div class="suggest">Mungkin: <b>${esc(s.suggestion.name)}</b><button data-act="l-suggest">Pakai</button></div>`;
   return `<div class="stack">${html}</div>`;
+}
+// Every part on every photo of a zone, grouped by photo, in a fixed order
+// (rows never jump under a finger). Tapping a row opens that photo and picks the part, exactly as
+// tapping its dot does. Problem types no photo shows are listed last.
+function zoneParts(s, zone) {
+  const pages = GROUPS[zone.group];
+  const onPhotos = new Set(pages.flatMap((pg) => (pg.parts || []).map((p) => p.fm)));
+  let html = "";
+  pages.forEach((pg, pi) => {
+    const rows = (pg.parts || []).map((p, n) => {
+      const sel = s.pick && (s.pick.spot ? s.pick.spot === pg.imageKey + ":" + n : false);
+      const sub = p.routine ? "Servis rutin — catat ganti" : p.brake ? "Rem — pilih masalahnya" : p.fm;
+      return `<button class="row ${sel ? "selected" : ""}" data-act="l-zpart" data-p="${pi}" data-v="${n}"><span class="grow"><span class="title">${esc(p.label)}</span><span class="meta">${esc(sub)}</span></span>${chevron()}</button>`;
+    });
+    if ((pg.wheels || []).length) rows.push(pi === s.page
+      ? `<div class="row"><span class="grow"><span class="meta">Tekan nomor roda di foto.</span></span></div>`
+      : `<button class="row" data-act="l-page" data-v="${pi}"><span class="grow"><span class="title">Pilih nomor roda</span><span class="meta">Ban, baud roda, velg</span></span>${chevron()}</button>`);
+    if (pg.crack) rows.push(pi === s.page
+      ? `<div class="row"><span class="grow"><span class="meta">Chassis retak? Tekan tempat retaknya di foto.</span></span></div>`
+      : `<button class="row" data-act="l-page" data-v="${pi}"><span class="grow"><span class="title">Rangka retak</span><span class="meta">Tandai tempat retaknya di foto</span></span>${chevron()}</button>`);
+    if (rows.length) html += `<span class="eyebrow" style="margin-top:6px">${esc(pg.title)}${pi === s.page && pages.length > 1 ? " · di foto" : ""}</span><div class="group">${rows.join("")}</div>`;
+  });
+  const rest = newIssueModes(zone.cats).filter((f) => !onPhotos.has(f.name) && !CRACK_FMS.includes(f.name) && !WHEEL_CHOICES.includes(f.name) && !BRAKE_CHOICES.includes(f.name));
+  if (rest.length) html += `<span class="eyebrow" style="margin-top:6px">Masalah lain di bagian ini</span>` + fmList(rest, s);
+  return html;
 }
 function fmList(list, s) {
   return `<div class="group">${list.map((f) => {
@@ -1271,7 +1329,7 @@ function sheetAction(a, el) {
     case "l-ganti": s.pickTruck = true; rerender(); return;
     case "l-zone": {
       const z = ZONES.find((x) => x.key === d.v);
-      Object.assign(s, { zone: z.key, group: null, page: 0, pop: null, all: false, allCat: null });
+      Object.assign(s, { zone: z.key, group: z.group || null, page: 0, pop: null, all: false, allCat: null });
       rerender(); return;
     }
     case "l-into": { const z = ZONES.find((x) => x.key === s.zone); if (z && z.group) { s.group = z.group; s.page = 0; s.pop = null; } rerender(); return; }
@@ -1282,6 +1340,9 @@ function sheetAction(a, el) {
     case "l-loc": s.loc = d.v; rerender(); return;
     case "l-fm": { const f = fmById(d.id); s.pick = { fmId: f.id, fmName: f.name, label: f.name }; rerender(); return; }
     case "l-suggest": { const f = fmById(s.suggestion.id); if (f) s.pick = { fmId: f.id, fmName: f.name, label: f.name }; rerender(); return; }
+    case "l-zpart":
+      s.page = Number(d.p); s.pop = null;
+    // falls through: pick the part on that photo, same as tapping its dot
     case "l-part": {
       const page = GROUPS[s.group][s.page];
       const p = page.parts[Number(d.v)];
