@@ -924,7 +924,19 @@ document.addEventListener("pointerdown", touch, { passive: true });
 document.addEventListener("keydown", touch, { passive: true });
 document.addEventListener("wheel", touch, { passive: true });
 document.addEventListener("scroll", touch, { passive: true, capture: true });
-window.addEventListener("resize", () => { if (S.data) render(); });
+// Re-render only when the layout itself changes, which depends on width
+// alone (split view >= 900px, dots-only photos < 600px). On Android the
+// on-screen keyboard resizes the window's HEIGHT; re-rendering then replaced
+// the focused note box, which closed the keyboard, which resized again --
+// the keyboard flashed open and shut on every tap into "Catatan".
+const layoutOf = () => (innerWidth >= 900 ? "split" : innerWidth >= 600 ? "mid" : "phone");
+let lastLayout = layoutOf();
+window.addEventListener("resize", () => {
+  const now = layoutOf();
+  if (now === lastLayout) return;
+  lastLayout = now;
+  if (S.data) render();
+});
 
 // ---------- photos ----------
 const MAX_VIDEO_BYTES = 15 * 1024 * 1024;
@@ -1202,7 +1214,7 @@ function listPane(s) {
   }
   if (!r) html += `<span class="eyebrow">Lokasi truk</span><div class="seg">${Object.keys(LOCATION_LABELS).map((k) => `<button class="${s.loc === k ? "on" : ""}" data-act="l-loc" data-v="${k}">${LOCATION_LABELS[k]}</button>`).join("")}</div>`;
   html += `<span class="eyebrow">Catatan (boleh pakai mic di keyboard)</span><textarea class="field" data-bind="desc" placeholder="mis. selang putus, sementara disumbat">${esc(s.desc)}</textarea>`;
-  if (s.suggestion && (!s.pick || s.pick.fmId !== s.suggestion.id)) html += `<div class="suggest">Mungkin: <b>${esc(s.suggestion.name)}</b><button data-act="l-suggest">Pakai</button></div>`;
+  html += suggestionHtml(s);
   return `<div class="stack">${html}</div>`;
 }
 // The list follows the photo on screen: its parts, in the same order as
@@ -1281,11 +1293,24 @@ function rutinFoot(s) {
 }
 
 let suggestTimer = null;
+// Swap just the "Mungkin: ..." line: re-rendering the sheet while someone is
+// typing would replace the note box and drop the keyboard.
+function suggestionHtml(s) {
+  return s.suggestion && (!s.pick || s.pick.fmId !== s.suggestion.id)
+    ? `<div class="suggest">Mungkin: <b>${esc(s.suggestion.name)}</b><button data-act="l-suggest">Pakai</button></div>` : "";
+}
+function showSuggestion(s) {
+  const root = document.querySelector("#sheet-root");
+  const old = root && root.querySelector(".suggest");
+  if (old) old.remove();
+  const ta = root && root.querySelector('textarea[data-bind="desc"]');
+  if (ta) ta.insertAdjacentHTML("afterend", suggestionHtml(s));
+}
 function suggestFromText() {
   clearTimeout(suggestTimer);
   const s = S.sheet;
   const text = (s.desc || "").trim();
-  if (text.length < 4) { if (s.suggestion) { s.suggestion = null; } return; }
+  if (text.length < 4) { if (s.suggestion) { s.suggestion = null; showSuggestion(s); } return; }
   suggestTimer = setTimeout(async () => {
     try {
       const { failure_mode_id, confidence } = await api("classify_failure_mode", { description: text });
@@ -1293,7 +1318,7 @@ function suggestFromText() {
       const f = failure_mode_id && confidence !== "none" ? fmById(failure_mode_id) : null;
       const changed = (f && f.id) !== (s.suggestion && s.suggestion.id);
       s.suggestion = f ? { id: f.id, name: f.name } : null;
-      if (changed) renderSheet();
+      if (changed) showSuggestion(s);
     } catch (e) { /* a suggestion never blocks anything */ }
   }, 900);
 }
